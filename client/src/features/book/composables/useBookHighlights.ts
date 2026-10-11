@@ -66,6 +66,7 @@ export function useBookHighlights(bookIdRef: Ref<number>) {
     const params = new URLSearchParams({
       page: String(page),
       pageSize: String(PAGE_SIZE),
+      includeContext: 'true',
       sortBy: spec.value.sortBy,
       sortDir: spec.value.sortDir,
     })

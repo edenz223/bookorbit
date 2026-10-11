@@ -136,6 +136,30 @@ export interface AnnotationStatsResult {
 export class AnnotationRepository {
   constructor(@Inject(DB) private readonly db: Db) {}
 
+  async findContextSources(userId: number, ids: number[]) {
+    if (ids.length === 0) return [];
+    return this.db
+      .select({
+        annotationId: annotations.id,
+        text: annotations.text,
+        cfi: annotationPositions.pos0,
+        bookFileId: bookFiles.id,
+        absolutePath: bookFiles.absolutePath,
+        format: bookFiles.format,
+      })
+      .from(annotations)
+      .innerJoin(annotationPositions, and(eq(annotationPositions.annotationId, annotations.id), eq(annotationPositions.format, 'cfi')))
+      .innerJoin(bookFiles, and(eq(bookFiles.id, annotationPositions.bookFileId), eq(bookFiles.bookId, annotations.bookId)))
+      .where(
+        and(
+          eq(annotations.userId, userId),
+          inArray(annotations.id, ids),
+          inArray(annotationPositions.status, ['exact', 'repaired']),
+          inArray(bookFiles.format, ['epub', 'kepub']),
+        ),
+      );
+  }
+
   private hubColumns() {
     const jumpFileId = sql<number | null>`coalesce(
       ${annotationPositions.bookFileId},

@@ -14,6 +14,7 @@ import type {
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { foldActivityWeeks, longestQuietWeeks } from './annotation-stats.utils';
 import { AnnotationConversionService } from './annotation-conversion.service';
+import { AnnotationContextService } from './annotation-context.service';
 import { AnnotationExportService, type AnnotationExportFormat, type AnnotationExportResult } from './annotation-export.service';
 import { AnnotationSyncRepository } from './annotation-sync.repository';
 import { AnnotationRepository, type HubAnnotationRow, type HubFilters, type HubSort } from './annotation.repository';
@@ -42,6 +43,7 @@ export class AnnotationHubService {
     private readonly syncRepo: AnnotationSyncRepository,
     private readonly conversionService: AnnotationConversionService,
     private readonly rebuilderRegistry: DevicePositionRebuilderRegistry,
+    private readonly contextService: AnnotationContextService,
   ) {}
 
   async list(userId: number, query: AnnotationHubQueryDto): Promise<AnnotationHubResponse> {
@@ -63,7 +65,8 @@ export class AnnotationHubService {
         ] as AnnotationHubStats['originBreakdown']
       ).filter((entry) => entry.count > 0),
     };
-    return { items: items.map((row) => this.toHubItem(row)), total, page, pageSize, stats };
+    const mapped = items.map((row) => this.toHubItem(row));
+    return { items: query.includeContext ? await this.contextService.enrich(userId, mapped) : mapped, total, page, pageSize, stats };
   }
 
   /** Total annotations the hub lists by default; trashed rows are excluded. */

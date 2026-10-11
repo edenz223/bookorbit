@@ -89,6 +89,30 @@ async function makeRepository(db: ReturnType<typeof makeDb>): Promise<Annotation
 }
 
 describe('AnnotationRepository', () => {
+  describe('findContextSources', () => {
+    it('uses one user-scoped query and binds files to their CFI and book', async () => {
+      const db = makeDb([]);
+      const repo = await makeRepository(db);
+      await repo.findContextSources(42, [1, 2]);
+      expect(db.select).toHaveBeenCalledTimes(1);
+      const dialect = new PgDialect();
+      const condition = dialect.sqlToQuery(db._queries[0].where.mock.calls[0][0]);
+      expect(condition.sql).toContain('"annotations"."user_id" =');
+      expect(condition.params).toEqual([42, 1, 2, 'exact', 'repaired', 'epub', 'kepub']);
+      const joins = db._queries[0].innerJoin.mock.calls.map((call) => dialect.sqlToQuery(call[1] as SQL));
+      expect(joins[0].params).toEqual(['cfi']);
+      expect(joins[1].sql).toContain('"book_files"."id" = "annotation_positions"."book_file_id"');
+      expect(joins[1].sql).toContain('"book_files"."book_id" = "annotations"."book_id"');
+    });
+
+    it('does not query for an empty page', async () => {
+      const db = makeDb();
+      const repo = await makeRepository(db);
+      expect(await repo.findContextSources(42, [])).toEqual([]);
+      expect(db.select).not.toHaveBeenCalled();
+    });
+  });
+
   describe('findByBookId', () => {
     it('queries with filters and returns the joined rows', async () => {
       const rows = [makeRow(), makeRow({ id: 2 })];

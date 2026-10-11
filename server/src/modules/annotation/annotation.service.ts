@@ -8,6 +8,7 @@ import { BookService } from '../book/book.service';
 import { AchievementEventsService, ACHIEVEMENT_EVENT_ANNOTATION_CREATED } from '../achievement/achievement-events.service';
 import { DEFAULT_ANNOTATION_COLOR, DEFAULT_ANNOTATION_STYLE } from './annotation.constants';
 import { AnnotationConversionService } from './annotation-conversion.service';
+import { AnnotationContextService } from './annotation-context.service';
 import { AnnotationRepository, type AnnotationFilters, type AnnotationSort } from './annotation.repository';
 import { AnnotationResponseDto } from './dto/annotation-response.dto';
 import { CreateAnnotationDto } from './dto/create-annotation.dto';
@@ -23,6 +24,7 @@ export class AnnotationService {
     private readonly bookService: BookService,
     private readonly achievementEvents: AchievementEventsService,
     private readonly conversionService: AnnotationConversionService,
+    private readonly contextService: AnnotationContextService,
   ) {}
 
   async getAnnotations(bookId: number, user: RequestUser): Promise<AnnotationResponseDto[]> {
@@ -50,7 +52,7 @@ export class AnnotationService {
       this.annotationRepo.getDistinctChapters(bookId, user.id),
     ]);
 
-    return {
+    const response: AnnotationListResponse = {
       items: items.map((row) => {
         const dto = AnnotationResponseDto.from(row);
         return {
@@ -81,6 +83,8 @@ export class AnnotationService {
         chapters,
       },
     };
+    if (query.includeContext) response.items = await this.contextService.enrich(user.id, response.items);
+    return response;
   }
 
   async createAnnotation(bookId: number, user: RequestUser, dto: CreateAnnotationDto): Promise<AnnotationResponseDto> {

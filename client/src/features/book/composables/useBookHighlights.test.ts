@@ -99,6 +99,7 @@ describe('useBookHighlights', () => {
     const url = mockFetch.mock.calls[0]?.[0] as string
     expect(url).toContain('page=1')
     expect(url).toContain('pageSize=100')
+    expect(url).toContain('includeContext=true')
     expect(url).toContain('sortBy=position')
     expect(url).toContain('sortDir=asc')
   })

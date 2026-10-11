@@ -67,6 +67,9 @@ function makeService(rebuilderRegistered = false) {
   const conversionService = { ensureCfiPositionsForBook: vi.fn().mockResolvedValue(1) };
   const rebuilder = { rebuildCanonicalPositions: vi.fn().mockResolvedValue({ rebuilt: true }) };
   const rebuilderRegistry = new DevicePositionRebuilderRegistry();
+  const contextService = {
+    enrich: vi.fn((_userId, items) => Promise.resolve(items.map((item) => ({ ...item, context: { before: 'before ', after: ' after' } })))),
+  };
   if (rebuilderRegistered) rebuilderRegistry.register(rebuilder);
   const service = new AnnotationHubService(
     annotationRepo as never,
@@ -74,11 +77,24 @@ function makeService(rebuilderRegistered = false) {
     syncRepo as never,
     conversionService as never,
     rebuilderRegistry,
+    contextService as never,
   );
-  return { service, annotationRepo, exportService, syncRepo, conversionService, rebuilder, rebuilderRegistry };
+  return { service, annotationRepo, exportService, syncRepo, conversionService, rebuilder, rebuilderRegistry, contextService };
 }
 
 describe('AnnotationHubService', () => {
+  it('opts into context without changing pagination or the original quote', async () => {
+    const { service, contextService } = makeService();
+    const plain = await service.list(10, { page: 3 });
+    expect(plain.items[0]).not.toHaveProperty('context');
+    expect(contextService.enrich).not.toHaveBeenCalled();
+    const enriched = await service.list(10, { page: 3, includeContext: true });
+    expect(contextService.enrich).toHaveBeenCalledWith(10, plain.items);
+    expect(enriched.items[0].context).toEqual({ before: 'before ', after: ' after' });
+    expect(enriched.items[0].text).toBe(plain.items[0].text);
+    expect(enriched.page).toBe(3);
+  });
+
   describe('countActive', () => {
     it('counts the annotations the hub lists by default, excluding the trash', async () => {
       const { service, annotationRepo } = makeService();

@@ -7,6 +7,11 @@ import { ANNOTATION_POSITION_FORMATS, ANNOTATION_STYLES, type AnnotationPosition
 
 export class AnnotationHubQueryDto {
   @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  includeContext?: boolean;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)

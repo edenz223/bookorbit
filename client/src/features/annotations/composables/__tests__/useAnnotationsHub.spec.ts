@@ -163,6 +163,7 @@ describe('useAnnotationsHub', () => {
 
       const url = String(apiMock.mock.calls[0][0])
       expect(url.startsWith('/api/v1/annotations?')).toBe(true)
+      expect(url).toContain('includeContext=true')
       expect(hub.items.value).toEqual(body.items)
       expect(hub.total.value).toBe(1)
     })

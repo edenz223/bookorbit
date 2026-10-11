@@ -11,6 +11,7 @@ import { AnnotationConversionService } from './annotation-conversion.service';
 import { AnnotationPositionRepository } from './annotation-position.repository';
 import { AnnotationRepository } from './annotation.repository';
 import { AnnotationService } from './annotation.service';
+import { AnnotationContextService } from './annotation-context.service';
 import { AnnotationSyncRepository } from './annotation-sync.repository';
 import { AnnotationSyncService } from './annotation-sync.service';
 import { DevicePositionRebuilderRegistry } from './device-position-rebuilder';
@@ -20,6 +21,7 @@ import { DevicePositionRebuilderRegistry } from './device-position-rebuilder';
   controllers: [AnnotationController, AnnotationHubController],
   providers: [
     AnnotationService,
+    AnnotationContextService,
     AnnotationRepository,
     AnnotationPositionRepository,
     AnnotationSyncRepository,

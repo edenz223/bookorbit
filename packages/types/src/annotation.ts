@@ -82,6 +82,11 @@ export interface AnnotationPdfPosition {
   rects: AnnotationRect[];
 }
 
+export interface AnnotationContext {
+  before: string;
+  after: string;
+}
+
 export interface AnnotationItem {
   id: number;
   bookId: number;
@@ -89,6 +94,7 @@ export interface AnnotationItem {
   jumpFileId: number | null;
   pageno: number | null;
   text: string;
+  context?: AnnotationContext | null;
   color: string;
   style: string;
   note: string | null;

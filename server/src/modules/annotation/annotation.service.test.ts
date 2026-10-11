@@ -8,6 +8,7 @@ import { DEFAULT_ANNOTATION_COLOR, DEFAULT_ANNOTATION_STYLE } from './annotation
 import { AnnotationConversionService } from './annotation-conversion.service';
 import { AnnotationRepository } from './annotation.repository';
 import { AnnotationService } from './annotation.service';
+import { AnnotationContextService } from './annotation-context.service';
 import { AnnotationResponseDto } from './dto/annotation-response.dto';
 import type { CreateAnnotationDto } from './dto/create-annotation.dto';
 import type { UpdateAnnotationDto } from './dto/update-annotation.dto';
@@ -82,6 +83,9 @@ async function makeService() {
   const conversionService = {
     ensureCfiPositionsForBook: vi.fn().mockResolvedValue(0),
   };
+  const contextService = {
+    enrich: vi.fn((_userId, items) => Promise.resolve(items.map((item) => ({ ...item, context: { before: 'before ', after: ' after' } })))),
+  };
   const module = await Test.createTestingModule({
     providers: [
       AnnotationService,
@@ -89,6 +93,7 @@ async function makeService() {
       { provide: BookService, useValue: bookService },
       { provide: AchievementEventsService, useValue: achievementEvents },
       { provide: AnnotationConversionService, useValue: conversionService },
+      { provide: AnnotationContextService, useValue: contextService },
     ],
   }).compile();
   const service = module.get(AnnotationService);
@@ -98,6 +103,7 @@ async function makeService() {
     bookService,
     conversionService,
     achievementEvents,
+    contextService,
   };
 }
 
@@ -666,6 +672,20 @@ describe('AnnotationService', () => {
   });
 
   describe('getAnnotationsPaginated', () => {
+    it('only enriches the requested page when context is explicitly enabled', async () => {
+      const { service, annotationRepo, contextService } = await makeService();
+      annotationRepo.findPaginated.mockResolvedValue({ items: [makeAnnotationRow()], total: 100 });
+      annotationRepo.getStats.mockResolvedValue(makeStatsResult());
+      annotationRepo.getDistinctChapters.mockResolvedValue([]);
+      const plain = await service.getAnnotationsPaginated(5, makeUser(), { page: 2 });
+      expect(plain.items[0]).not.toHaveProperty('context');
+      expect(contextService.enrich).not.toHaveBeenCalled();
+      const enriched = await service.getAnnotationsPaginated(5, makeUser(), { page: 2, includeContext: true });
+      expect(enriched.items[0].context).toEqual({ before: 'before ', after: ' after' });
+      expect(contextService.enrich).toHaveBeenCalledWith(1, plain.items);
+      expect(enriched.total).toBe(100);
+    });
+
     function makeStatsResult(overrides?: Record<string, unknown>) {
       return {
         totalHighlights: 3,

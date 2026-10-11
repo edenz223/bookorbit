@@ -1,4 +1,4 @@
-import type { AnnotationPdfPosition } from '@bookorbit/types';
+import type { AnnotationContext, AnnotationPdfPosition } from '@bookorbit/types';
 
 import type { AnnotationWithCfi } from '../annotation.repository';
 
@@ -9,6 +9,7 @@ export class AnnotationResponseDto {
   jumpFileId!: number | null;
   pageno!: number | null;
   text!: string;
+  context?: AnnotationContext | null;
   color!: string;
   style!: string;
   note!: string | null;

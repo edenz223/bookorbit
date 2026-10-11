@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import type { AnnotationContext } from '@bookorbit/types';
 
 import { chapterIndexFromSpineStep, findElementById, parseCfi } from './cfi.utils';
 import { EpubDomService } from './epub-dom.service';
+import type { EpubFileSource } from './epub-dom.service';
+import { HighlightContextChapter } from './highlight-context';
 import {
   CfiToXPointerResult,
   ChapterDocument,
@@ -23,6 +26,12 @@ export interface XPointerToCfiParams {
   pos0: string;
   pos1: string | null;
   text: string | null;
+}
+
+export interface HighlightContextSource extends EpubFileSource {
+  annotationId: number;
+  cfi: string;
+  text: string;
 }
 
 export interface CfiToXPointerParams {
@@ -66,6 +75,51 @@ export class PositionConverterService {
   readonly version = CONVERTER_VERSION;
 
   constructor(private readonly epubDom: EpubDomService) {}
+
+  async getHighlightContexts(sources: HighlightContextSource[]): Promise<Map<number, AnnotationContext | null>> {
+    const contexts = new Map<number, AnnotationContext | null>(sources.map((source) => [source.annotationId, null]));
+    const groups = new Map<string, { chapterIndex: number; sources: HighlightContextSource[] }>();
+    for (const source of sources) {
+      const parsed = parseCfi(source.cfi);
+      const chapterIndex = parsed ? chapterIndexFromSpineStep(parsed.spineStep) : null;
+      if (chapterIndex == null || !['epub', 'kepub'].includes(source.format ?? '')) continue;
+      const key = `${source.bookFileId}:${chapterIndex}`;
+      const group = groups.get(key) ?? { chapterIndex, sources: [] };
+      group.sources.push(source);
+      groups.set(key, group);
+    }
+    const loaders = new Map<number, ReturnType<EpubDomService['createChapterLoader']>>();
+    const pending = Array.from(groups.values());
+    let next = 0;
+    const worker = async () => {
+      while (next < pending.length) {
+        const group = pending[next++];
+        const source = group.sources[0];
+        try {
+          let loader = loaders.get(source.bookFileId);
+          if (!loader) {
+            loader = this.epubDom.createChapterLoader(source);
+            loaders.set(source.bookFileId, loader);
+          }
+          const doc = await (await loader)(group.chapterIndex);
+          if (!doc) continue;
+          const chapter = new HighlightContextChapter(doc);
+          for (const item of group.sources) {
+            try {
+              contexts.set(item.annotationId, chapter.extract(item.cfi, item.text));
+            } catch {
+              contexts.set(item.annotationId, null);
+            }
+          }
+        } catch {
+          // An unavailable chapter must not prevent the rest of the page from loading.
+          continue;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, pending.length) }, worker));
+    return contexts;
+  }
 
   async xpointerToCfi(params: XPointerToCfiParams): Promise<XPointerToCfiOutcome> {
     const parsed = parseXPointer(params.pos0);

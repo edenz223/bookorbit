@@ -100,6 +100,7 @@ export class ChapterTextIndex {
   constructor(
     root: CfiNode,
     private readonly engineBoundaries = new Map<CfiNode, number[]>(),
+    private readonly excludedElements = new Set<string>(),
   ) {
     const state: BuildState = {
       collapsedPoints: [],
@@ -183,6 +184,10 @@ export class ChapterTextIndex {
         continue;
       }
       if (isElementNode(child)) {
+        if (this.excludedElements.has((child.name ?? '').toLowerCase())) {
+          i += 1;
+          continue;
+        }
         const isBlock = BLOCK_ELEMENTS.has((child.name ?? '').toLowerCase());
         if (isBlock) {
           state.atBoundary = true;

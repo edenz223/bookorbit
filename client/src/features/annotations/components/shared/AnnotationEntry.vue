@@ -154,7 +154,11 @@ function handlePurge() {
 
     <!-- WHAT -->
     <div class="col-start-3 min-w-0" :class="stacked ? 'row-start-2' : 'row-start-1'">
-      <p class="text-foreground" :class="quoteClass">{{ annotation.text }}</p>
+      <p class="whitespace-pre-wrap break-words font-normal text-foreground" :class="compact ? 'text-sm leading-relaxed' : 'text-base leading-[1.6]'">
+        <span v-if="annotation.context?.before">{{ annotation.context.before }}</span
+        ><strong class="font-bold" :class="quoteClass">{{ annotation.text }}</strong
+        ><span v-if="annotation.context?.after">{{ annotation.context.after }}</span>
+      </p>
       <div v-if="annotation.note" class="mt-2 border-l-2 border-primary pl-2.5">
         <span class="mb-0.5 block text-[8.5px] font-bold uppercase tracking-[0.13em] text-primary">{{ t('annotations.hub.noteLabel') }}</span>
         <p class="text-[11.5px] leading-relaxed text-foreground">{{ annotation.note }}</p>

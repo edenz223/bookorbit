@@ -54,6 +54,17 @@ async function buildEpub(
 }
 
 describe('EpubDomService', () => {
+  it('loads multiple chapters from a verified file snapshot without database queries', async () => {
+    const db = makeDb(epubPath);
+    const service = new EpubDomService(db as never);
+    const loader = await service.createChapterLoader({ bookFileId: 1, absolutePath: epubPath, format: 'epub' });
+    const first = await loader(0);
+    expect(first?.index.collapsed).toBe('First chapter text.');
+    expect((await loader(1))?.index.collapsed).toBe('Second chapter text.');
+    expect(await loader(0)).toBe(first);
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
   let dir: string;
   let epubPath: string;
 

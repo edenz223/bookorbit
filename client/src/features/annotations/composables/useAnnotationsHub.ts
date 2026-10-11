@@ -113,7 +113,7 @@ export function useAnnotationsHub() {
     else loading.value = true
     error.value = null
     try {
-      const res = await api(`/api/v1/annotations?${buildQuery({ page: String(target), pageSize: String(PAGE_SIZE) })}`)
+      const res = await api(`/api/v1/annotations?${buildQuery({ page: String(target), pageSize: String(PAGE_SIZE), includeContext: 'true' })}`)
       if (seq !== loadSeq) return
       if (!res.ok) {
         error.value = 'failed'

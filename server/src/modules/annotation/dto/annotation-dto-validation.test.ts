@@ -20,6 +20,17 @@ async function errorsFor<T extends object>(cls: new () => T, value: Record<strin
 }
 
 describe('Annotation DTO validation', () => {
+  it('validates includeContext strictly on both paginated queries', async () => {
+    for (const cls of [AnnotationQueryDto, AnnotationHubQueryDto]) {
+      expect(plainToInstance(cls, { includeContext: 'true' }).includeContext).toBe(true);
+      expect(plainToInstance(cls, { includeContext: 'false' }).includeContext).toBe(false);
+      expect(plainToInstance(cls, {}).includeContext).toBeUndefined();
+      expect(await errorsFor(cls, { includeContext: 'true' })).toEqual([]);
+      expect(await errorsFor(cls, { includeContext: 'false' })).toEqual([]);
+      expect((await errorsFor(cls, { includeContext: 'yes' })).length).toBeGreaterThan(0);
+    }
+  });
+
   it('accepts create payload with optional fields and valid style', async () => {
     const errors = await errorsFor(CreateAnnotationDto, {
       cfi: 'epubcfi(/6/4!/4/2/1:0)',

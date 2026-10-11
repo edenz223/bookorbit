@@ -114,6 +114,12 @@ interface SpineCacheEntry {
   spine: EpubSpine;
 }
 
+export interface EpubFileSource {
+  bookFileId: number;
+  absolutePath: string;
+  format: string | null;
+}
+
 @Injectable()
 export class EpubDomService {
   private readonly logger = new Logger(EpubDomService.name);
@@ -134,6 +140,15 @@ export class EpubDomService {
 
   async getChapter(bookFileId: number, chapterIndex: number): Promise<ChapterDocument | null> {
     const entry = await this.getSpineEntry(bookFileId);
+    return this.getChapterFromEntry(bookFileId, chapterIndex, entry);
+  }
+
+  async createChapterLoader(file: EpubFileSource): Promise<(chapterIndex: number) => Promise<ChapterDocument | null>> {
+    const entry = await this.getSpineEntry(file.bookFileId, file);
+    return (chapterIndex) => this.getChapterFromEntry(file.bookFileId, chapterIndex, entry);
+  }
+
+  private async getChapterFromEntry(bookFileId: number, chapterIndex: number, entry: SpineCacheEntry | null): Promise<ChapterDocument | null> {
     if (!entry) return null;
     const href = entry.spine.hrefs[chapterIndex];
     if (href == null) return null;
@@ -162,12 +177,14 @@ export class EpubDomService {
     }
   }
 
-  private async getSpineEntry(bookFileId: number): Promise<SpineCacheEntry | null> {
-    const [file] = await this.db
-      .select({ absolutePath: bookFiles.absolutePath, format: bookFiles.format })
-      .from(bookFiles)
-      .where(eq(bookFiles.id, bookFileId))
-      .limit(1);
+  private async getSpineEntry(bookFileId: number, source?: EpubFileSource): Promise<SpineCacheEntry | null> {
+    const [file] = source
+      ? [source]
+      : await this.db
+          .select({ absolutePath: bookFiles.absolutePath, format: bookFiles.format })
+          .from(bookFiles)
+          .where(eq(bookFiles.id, bookFileId))
+          .limit(1);
     if (!file || (file.format !== 'epub' && file.format !== 'kepub')) return null;
 
     let mtimeMs: number;
