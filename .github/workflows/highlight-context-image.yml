@@ -1,0 +1,73 @@
+name: Highlight Context Image
+
+on:
+  push:
+    branches: [codex/highlight-context-50-words]
+  workflow_dispatch:
+
+concurrency:
+  group: highlight-context-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'edenz223/bookorbit' && github.ref == 'refs/heads/codex/highlight-context-50-words'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare image metadata
+        id: image
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "name=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "version=highlight-context-${COMMIT_SHA:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+
+      - name: Build and publish amd64 image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:highlight-context
+            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
+          build-args: APP_VERSION=${{ steps.image.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.image.outputs.version }}
+          cache-from: type=gha,scope=highlight-context-amd64
+          cache-to: type=gha,mode=max,scope=highlight-context-amd64
+
+      - name: Write deployment reference
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_VERSION: ${{ steps.image.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          printf 'Image: `%s:%s`\n\nDigest: `%s@%s`\n' \
+            "$IMAGE_NAME" "$IMAGE_VERSION" "$IMAGE_NAME" "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"

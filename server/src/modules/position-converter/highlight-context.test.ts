@@ -14,14 +14,21 @@ function fixture(body: string, text = 'MARK', occurrence = 0, language = 'en', c
 }
 
 describe('highlight context extraction', () => {
-  it('keeps the nearest 50 words on each side, including punctuation', () => {
-    const before = Array.from({ length: 60 }, (_, i) => `before${i},`).join(' ');
-    const after = Array.from({ length: 60 }, (_, i) => `after${i}!`).join(' ');
-    const { chapter, cfi } = fixture(`<p>${before} MARK ${after}</p>`);
-    expect(chapter.extract(cfi, 'MARK')).toEqual({
-      before: `${Array.from({ length: 50 }, (_, i) => `before${i + 10},`).join(' ')} `,
-      after: ` ${Array.from({ length: 50 }, (_, i) => `after${i}!`).join(' ')} `,
-    });
+  it('uses the complete paragraph when it fits the shared budget', () => {
+    const { chapter, cfi } = fixture('<p>Older sentence. Previous sentence. MARK. Next sentence! Later sentence.</p>', 'MARK.');
+    expect(chapter.extract(cfi, 'MARK.')).toEqual({ before: 'Older sentence. Previous sentence. ', after: ' Next sentence! Later sentence.' });
+  });
+
+  it('shares 100 Unicode characters including truncation markers', () => {
+    const before = '中😀'.repeat(35);
+    const after = '🚀文'.repeat(35);
+    const { chapter, cfi } = fixture(`<p>${before}MARK${after}。</p>`);
+    const context = chapter.extract(cfi, 'MARK')!;
+    expect(Array.from(context.before + context.after)).toHaveLength(100);
+    expect(context.before.startsWith('…')).toBe(true);
+    expect(context.after.endsWith('…')).toBe(true);
+    expect(context.before.slice(1)).toBe(Array.from(before).slice(-49).join(''));
+    expect(context.after.slice(0, -1)).toBe(Array.from(after).slice(0, 49).join(''));
   });
 
   it('stays within the chapter and preserves exact adjacency', () => {
@@ -31,16 +38,16 @@ describe('highlight context extraction', () => {
     expect(end.chapter.extract(end.cfi, 'MARK')).toEqual({ before: 'previous: ', after: '' });
   });
 
-  it.each(['zh', 'en', 'invalid_locale'])('segments Chinese and mixed text with locale %s', (language) => {
-    const before = '阅读书籍，学习知识。'.repeat(30);
-    const after = '中文 English 世界。'.repeat(30);
-    const { chapter, cfi } = fixture(`<p>${before}MARK${after}</p>`, 'MARK', 0, language);
-    const context = chapter.extract(cfi, 'MARK')!;
-    const segmenter = new Intl.Segmenter(language === 'invalid_locale' ? 'zh' : language, { granularity: 'word' });
-    expect(Array.from(segmenter.segment(context.before)).filter((part) => part.isWordLike)).toHaveLength(50);
-    expect(Array.from(segmenter.segment(context.after)).filter((part) => part.isWordLike)).toHaveLength(50);
-    expect(before.endsWith(context.before)).toBe(true);
-    expect(after.startsWith(context.after)).toBe(true);
+  it.each(['zh', 'en', 'invalid_locale'])('segments Chinese and mixed sentences with locale %s', (language) => {
+    const { chapter, cfi } = fixture('<p>更早一句。上一句 English！MARK。下一句中文？更晚一句。</p>', 'MARK。', 0, language);
+    expect(chapter.extract(cfi, 'MARK。')).toEqual({ before: '更早一句。上一句 English！', after: '下一句中文？更晚一句。' });
+  });
+
+  it('preserves paragraph, explicit and source line breaks', () => {
+    const { chapter, cfi } = fixture('<p>Outside.</p><p>Previous line<br/>MARK.<br/>Next line.</p><p>Outside.</p>', 'MARK.');
+    expect(chapter.extract(cfi, 'MARK.')).toEqual({ before: 'Previous line\n', after: '\nNext line.' });
+    const source = fixture('<p>before\r\nMARK after\ncontinued</p>');
+    expect(source.chapter.extract(source.cfi, 'MARK')).toEqual({ before: 'before\n', after: ' after\ncontinued' });
   });
 
   it('resolves cross-node, cross-paragraph ranges and Unicode/entities', () => {
@@ -52,12 +59,12 @@ describe('highlight context extraction', () => {
     const { chapter, cfi } = fixture(
       '<p>before </p><script>secret script</script><style>secret style</style><noscript>secret fallback</noscript><template>secret template</template><p>MARK after</p>',
     );
-    expect(chapter.extract(cfi, 'MARK')).toEqual({ before: 'before ', after: ' after' });
+    expect(chapter.extract(cfi, 'MARK')).toEqual({ before: '', after: ' after' });
   });
 
   it('uses the anchored occurrence and never searches for replacement text', () => {
-    const { chapter, cfi } = fixture('<p>first MARK left.</p><p>second MARK right.</p>', 'MARK', 1);
-    expect(chapter.extract(cfi, 'MARK')).toEqual({ before: 'first MARK left. second ', after: ' right.' });
+    const { chapter, cfi } = fixture('<p>First MARK left.</p><p>Second MARK right.</p>', 'MARK', 1);
+    expect(chapter.extract(cfi, 'MARK')).toEqual({ before: 'Second ', after: ' right.' });
     expect(chapter.extract(cfi, 'different text')).toBeNull();
     expect(chapter.extract('invalid', 'MARK')).toBeNull();
     expect(chapter.extract(cfi, '')).toBeNull();

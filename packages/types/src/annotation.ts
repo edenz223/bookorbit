@@ -87,6 +87,22 @@ export interface AnnotationContext {
   after: string;
 }
 
+export const ANNOTATION_COLLAPSE_WORDS = 75;
+
+export function countAnnotationWords(text: string, language = "zh"): number {
+  let segmenter: Intl.Segmenter;
+  try {
+    segmenter = new Intl.Segmenter(language, { granularity: "word" });
+  } catch {
+    segmenter = new Intl.Segmenter("zh", { granularity: "word" });
+  }
+  let count = 0;
+  for (const part of segmenter.segment(text)) {
+    if (part.isWordLike) count += 1;
+  }
+  return count;
+}
+
 export interface AnnotationItem {
   id: number;
   bookId: number;

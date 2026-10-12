@@ -78,6 +78,31 @@ describe('AnnotationEntry context', () => {
     expect(wrapper.get('strong').text()).toBe(annotation.text)
   })
 
+  it('preserves context line breaks around the bold quote', () => {
+    const wrapper = mountEntry({ context: { before: '上一句。\n', after: '\n下一句。' } })
+    const quote = wrapper.get('strong').element.parentElement!
+    expect(quote.textContent).toBe('上一句。\n<b>selected</b>\n下一句。')
+    expect(quote.classList.contains('whitespace-pre-wrap')).toBe(true)
+  })
+
+  it('folds only highlights above 75 words without removing their text', async () => {
+    const text = 'word '.repeat(76)
+    const wrapper = mountEntry({ text })
+    const quote = wrapper.get('strong').element.parentElement!
+    expect(quote.textContent).toBe(text)
+    expect(quote.classList.contains('line-clamp-5')).toBe(true)
+    const toggle = wrapper.get('button[aria-expanded]')
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(quote.classList.contains('line-clamp-5')).toBe(false)
+    expect(wrapper.emitted('open')).toBeUndefined()
+    await toggle.trigger('click')
+    expect(quote.classList.contains('line-clamp-5')).toBe(true)
+    await wrapper.setProps({ annotation: { ...annotation, text: 'word '.repeat(75) } })
+    expect(wrapper.find('button[aria-expanded]').exists()).toBe(false)
+    expect(quote.classList.contains('line-clamp-5')).toBe(false)
+  })
+
   it.each(['underline', 'strikethrough'])('applies %s only to the selected text', (style) => {
     const wrapper = mountEntry({ style, context: { before: 'before ', after: ' after' } })
     const className = style === 'underline' ? 'underline' : 'line-through'

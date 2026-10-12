@@ -101,6 +101,7 @@ export class ChapterTextIndex {
     root: CfiNode,
     private readonly engineBoundaries = new Map<CfiNode, number[]>(),
     private readonly excludedElements = new Set<string>(),
+    private readonly preserveLineBreaks = false,
   ) {
     const state: BuildState = {
       collapsedPoints: [],
@@ -189,6 +190,15 @@ export class ChapterTextIndex {
           continue;
         }
         const isBlock = BLOCK_ELEMENTS.has((child.name ?? '').toLowerCase());
+        if (this.preserveLineBreaks && child.name?.toLowerCase() === 'br') {
+          state.collapsedPoints.push('\n');
+          state.runByPoint.push(-1);
+          state.rawOffsetByPoint.push(-1);
+          state.separatorPending = false;
+          state.lastWasSpace = true;
+          i += 1;
+          continue;
+        }
         if (isBlock) {
           state.atBoundary = true;
           state.separatorPending = state.collapsedPoints.length > 0;
@@ -234,8 +244,9 @@ export class ChapterTextIndex {
         if (!whitespaceOnly && (!engineSpace || !engineLastWasSpace)) engineRawOffsets.push(rawConcatOffset);
         engineLastWasSpace = engineSpace;
         if (WHITESPACE_RE.test(cp)) {
-          if (!state.atBoundary && !state.lastWasSpace) {
-            state.collapsedPoints.push(' ');
+          const newline = this.preserveLineBreaks && (cp === '\n' || (cp === '\r' && raw[rawConcatOffset - partStart + 1] !== '\n'));
+          if (newline || (!state.atBoundary && !state.lastWasSpace && (!this.preserveLineBreaks || cp !== '\r'))) {
+            state.collapsedPoints.push(newline ? '\n' : ' ');
             state.runByPoint.push(runIdx);
             state.rawOffsetByPoint.push(rawConcatOffset);
             state.lastWasSpace = true;
@@ -246,9 +257,11 @@ export class ChapterTextIndex {
           }
         } else {
           if (state.separatorPending) {
-            state.collapsedPoints.push(' ');
-            state.runByPoint.push(-1);
-            state.rawOffsetByPoint.push(-1);
+            if (!this.preserveLineBreaks || state.collapsedPoints.at(-1) !== '\n') {
+              state.collapsedPoints.push(this.preserveLineBreaks ? '\n' : ' ');
+              state.runByPoint.push(-1);
+              state.rawOffsetByPoint.push(-1);
+            }
             state.separatorPending = false;
           }
           if (!emittedAny) {
