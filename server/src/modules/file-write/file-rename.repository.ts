@@ -1,3 +1,4 @@
+import { notifyBookContextsChanged, notifyBookFileChanged } from '../../common/utils/book-file-events';
 import { deleteBooksWithHashInvalidation } from '../../db/book-file-hash-history';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray } from 'drizzle-orm';
@@ -161,6 +162,7 @@ export class FileRenameRepository {
 
   async updateBookFilePath(fileId: number, absolutePath: string, relPath: string | null): Promise<void> {
     await this.db.update(bookFiles).set({ absolutePath, relPath }).where(eq(bookFiles.id, fileId));
+    notifyBookFileChanged(fileId);
   }
 
   async updateBookFolderPath(bookId: number, folderPath: string): Promise<void> {
@@ -174,6 +176,7 @@ export class FileRenameRepository {
       }
       await tx.update(books).set({ folderPath }).where(eq(books.id, bookId));
     });
+    for (const update of updates) notifyBookFileChanged(update.id);
   }
 
   /** The book that holds each folder, keyed by folder path. Folders no book holds are absent. */
@@ -256,6 +259,8 @@ export class FileRenameRepository {
         })
         .where(eq(books.id, input.targetBookId));
     });
+    for (const update of input.updates) notifyBookFileChanged(update.id);
+    notifyBookContextsChanged(input.targetBookId);
   }
 
   async checkPathTakenByOtherBook(absolutePath: string, currentBookId: number): Promise<boolean> {

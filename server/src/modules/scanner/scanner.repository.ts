@@ -1,3 +1,4 @@
+import { notifyBookContextsChanged, notifyBookFileChanged } from '../../common/utils/book-file-events';
 import { deleteBookFilesWithHashInvalidation, deleteBooksWithHashInvalidation } from '../../db/book-file-hash-history';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
@@ -224,10 +225,12 @@ export class ScannerRepository {
         ? sql`TRUE`
         : sql`EXISTS (SELECT 1 FROM ${bookFiles} WHERE ${bookFiles.id} = ${primaryFileId} AND ${bookFiles.bookId} = ${bookId})`;
 
-    await this.db
+    const changed = await this.db
       .update(books)
       .set({ primaryFileId, updatedAt: new Date() })
-      .where(and(eq(books.id, bookId), sql`${books.primaryFileId} IS DISTINCT FROM ${primaryFileId}`, primaryScope));
+      .where(and(eq(books.id, bookId), sql`${books.primaryFileId} IS DISTINCT FROM ${primaryFileId}`, primaryScope))
+      .returning({ id: books.id });
+    if (changed.length) notifyBookContextsChanged(bookId);
   }
 
   async markBooksAsMissing(ids: number[]) {
@@ -285,6 +288,8 @@ export class ScannerRepository {
       .set({ ...data, updatedAt: new Date() })
       .where(eq(bookFiles.id, id))
       .returning();
+    if (file && [data.mtime, data.sizeBytes, data.absolutePath, data.fileHash, data.format].some((value) => value !== undefined))
+      notifyBookFileChanged(id);
     return file;
   }
 

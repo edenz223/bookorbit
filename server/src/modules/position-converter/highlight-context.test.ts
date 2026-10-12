@@ -1,8 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
+import { stat } from 'fs/promises';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HighlightContextChapter } from './highlight-context';
+import { HighlightContextWindow } from './highlight-context-window';
 import { collapsedRangeToCfi, parseChapterDocument } from './position-converter.core';
 import { PositionConverterService, type HighlightContextSource } from './position-converter.service';
+
+vi.mock('fs/promises', async (importOriginal) => ({ ...(await importOriginal<typeof import('fs/promises')>()), stat: vi.fn() }));
+
+beforeEach(() => {
+  vi.mocked(stat)
+    .mockReset()
+    .mockResolvedValue({ mtimeMs: 1, ctimeMs: 1, size: 100 } as never);
+});
 
 function fixture(body: string, text = 'MARK', occurrence = 0, language = 'en', chapterIndex = 0) {
   const doc = parseChapterDocument(`<html xml:lang="${language}"><head><title>excluded title</title></head><body>${body}</body></html>`);
@@ -14,6 +24,14 @@ function fixture(body: string, text = 'MARK', occurrence = 0, language = 'en', c
 }
 
 describe('highlight context extraction', () => {
+  it('does not segment the paragraph when a long highlight needs no context', () => {
+    const text = 'word '.repeat(76).trim();
+    const { chapter, cfi } = fixture(`<p>before ${text} after</p>`, text);
+    const extract = vi.spyOn(HighlightContextWindow.prototype, 'extract');
+    expect(chapter.extract(cfi, text)).toEqual({ before: '', after: '' });
+    expect(extract).not.toHaveBeenCalled();
+    extract.mockRestore();
+  });
   it('uses the complete paragraph when it fits the shared budget', () => {
     const { chapter, cfi } = fixture('<p>Older sentence. Previous sentence. MARK. Next sentence! Later sentence.</p>', 'MARK.');
     expect(chapter.extract(cfi, 'MARK.')).toEqual({ before: 'Older sentence. Previous sentence. ', after: ' Next sentence! Later sentence.' });
@@ -72,6 +90,54 @@ describe('highlight context extraction', () => {
 });
 
 describe('highlight context batching', () => {
+  it('serves repeated large pages without loading chapters or extracting ranges again', async () => {
+    const doc = fixture('<p>before MARK after</p>').doc;
+    const load = vi.fn().mockResolvedValue(doc);
+    const epubDom = { createChapterLoader: vi.fn().mockResolvedValue(load) };
+    const service = new PositionConverterService(epubDom as never);
+    const extract = vi.spyOn(HighlightContextChapter.prototype, 'extract');
+    const sources = Array.from({ length: 50 }, (_, chapterIndex) => ({
+      annotationId: chapterIndex,
+      bookFileId: 1,
+      absolutePath: '/book.epub',
+      format: 'epub',
+      cfi: fixture('<p>before MARK after</p>', 'MARK', 0, 'en', chapterIndex).cfi,
+      text: 'MARK',
+    }));
+    const first = await service.getHighlightContexts(sources);
+    const second = await service.getHighlightContexts(sources);
+    expect(second).toEqual(first);
+    expect(load).toHaveBeenCalledTimes(50);
+    expect(extract).toHaveBeenCalledTimes(50);
+    expect(epubDom.createChapterLoader).toHaveBeenCalledTimes(1);
+    expect(stat).toHaveBeenCalledTimes(2);
+    extract.mockRestore();
+  });
+
+  it('invalidates results for edits, changed file versions and missing files', async () => {
+    const load = vi.fn().mockResolvedValue(fixture('<p>before MARK after</p>').doc);
+    const service = new PositionConverterService({ createChapterLoader: vi.fn().mockResolvedValue(load) } as never);
+    const source = {
+      annotationId: 1,
+      bookFileId: 1,
+      absolutePath: '/book.epub',
+      format: 'epub',
+      cfi: fixture('<p>before MARK after</p>').cfi,
+      text: 'MARK',
+    };
+    expect((await service.getHighlightContexts([source])).get(1)).not.toBeNull();
+    expect((await service.getHighlightContexts([{ ...source, text: 'changed text' }])).get(1)).toBeNull();
+    expect(
+      (await service.getHighlightContexts([{ ...source, cfi: fixture('<p>before MARK after</p>', 'before').cfi, text: 'before' }])).get(1),
+    ).toEqual({ before: '', after: ' MARK after' });
+    vi.mocked(stat).mockResolvedValue({ mtimeMs: 1, ctimeMs: 2, size: 101 } as never);
+    await service.getHighlightContexts([source]);
+    expect(load).toHaveBeenCalledTimes(4);
+    vi.mocked(stat).mockRejectedValueOnce(new Error('missing file'));
+    expect((await service.getHighlightContexts([source])).get(1)).toBeNull();
+    expect(load).toHaveBeenCalledTimes(4);
+  });
+
   it('reuses chapters and file loaders, limits concurrency to four and isolates failures', async () => {
     let active = 0;
     let peak = 0;

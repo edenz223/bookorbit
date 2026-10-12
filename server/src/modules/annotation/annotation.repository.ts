@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { scheduleAnnotationContext, scheduleContextRows } from './annotation-context.inputs';
 import {
   SQL,
   and,
@@ -356,6 +357,7 @@ export class AnnotationRepository {
         pos0: cfi,
         status: 'exact',
       });
+      await scheduleAnnotationContext(tx, row.id, row.userId);
       return { ...row, cfi, cfiStatus: 'exact', cfiExtras: null, jumpFileId: bookFileId ?? null, pageno: null };
     });
   }
@@ -379,6 +381,7 @@ export class AnnotationRepository {
         status: 'exact',
         extras: { pageno },
       });
+      await scheduleAnnotationContext(tx, row.id, row.userId);
       return {
         ...row,
         cfi: null,
@@ -430,12 +433,15 @@ export class AnnotationRepository {
   }
 
   async restore(annotationId: number, userId: number): Promise<AnnotationRow | null> {
-    const [row] = await this.db
-      .update(annotations)
-      .set({ deletedAt: null, version: sql`${annotations.version} + 1`, updatedAt: sql`now()` })
-      .where(and(eq(annotations.id, annotationId), eq(annotations.userId, userId), isNotNull(annotations.deletedAt)))
-      .returning();
-    return row ?? null;
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(annotations)
+        .set({ deletedAt: null, version: sql`${annotations.version} + 1`, updatedAt: sql`now()` })
+        .where(and(eq(annotations.id, annotationId), eq(annotations.userId, userId), isNotNull(annotations.deletedAt)))
+        .returning();
+      if (row) await scheduleAnnotationContext(tx, annotationId, userId, 50, true);
+      return row ?? null;
+    });
   }
 
   /**
@@ -697,18 +703,37 @@ export class AnnotationRepository {
 
   async bulkSetDeleted(userId: number, ids: number[], deleted: boolean): Promise<number> {
     if (ids.length === 0) return 0;
-    const result = await this.db
-      .update(annotations)
-      .set({
-        deletedAt: deleted ? sql`now()` : null,
-        version: sql`${annotations.version} + 1`,
-        updatedAt: sql`now()`,
-      })
-      .where(
-        and(inArray(annotations.id, ids), eq(annotations.userId, userId), deleted ? isNull(annotations.deletedAt) : isNotNull(annotations.deletedAt)),
-      )
-      .returning({ id: annotations.id });
-    return result.length;
+    return this.db.transaction(async (tx) => {
+      const result = await tx
+        .update(annotations)
+        .set({
+          deletedAt: deleted ? sql`now()` : null,
+          version: sql`${annotations.version} + 1`,
+          updatedAt: sql`now()`,
+        })
+        .where(
+          and(
+            inArray(annotations.id, ids),
+            eq(annotations.userId, userId),
+            deleted ? isNull(annotations.deletedAt) : isNotNull(annotations.deletedAt),
+          ),
+        )
+        .returning({ id: annotations.id });
+      if (!deleted && result.length)
+        await scheduleContextRows(
+          tx,
+          and(
+            eq(annotations.userId, userId),
+            inArray(
+              annotations.id,
+              result.map((row) => row.id),
+            ),
+          )!,
+          50,
+          true,
+        );
+      return result.length;
+    });
   }
 
   /** Active rows only, and only those whose star actually changes; never bumps the version. */

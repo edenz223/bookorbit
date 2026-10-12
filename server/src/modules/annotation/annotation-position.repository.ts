@@ -1,3 +1,4 @@
+import { scheduleAnnotationContext } from './annotation-context.inputs';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -14,23 +15,26 @@ export class AnnotationPositionRepository {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async upsert(position: NewAnnotationPosition): Promise<AnnotationPosition> {
-    const [row] = await this.db
-      .insert(annotationPositions)
-      .values(position)
-      .onConflictDoUpdate({
-        target: [annotationPositions.annotationId, annotationPositions.format],
-        set: {
-          pos0: sql`excluded.pos0`,
-          pos1: sql`excluded.pos1`,
-          status: sql`excluded.status`,
-          converterVersion: sql`excluded.converter_version`,
-          extras: sql`excluded.extras`,
-          bookFileId: sql`excluded.book_file_id`,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
-    return row;
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(annotationPositions)
+        .values(position)
+        .onConflictDoUpdate({
+          target: [annotationPositions.annotationId, annotationPositions.format],
+          set: {
+            pos0: sql`excluded.pos0`,
+            pos1: sql`excluded.pos1`,
+            status: sql`excluded.status`,
+            converterVersion: sql`excluded.converter_version`,
+            extras: sql`excluded.extras`,
+            bookFileId: sql`excluded.book_file_id`,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+      if (position.format === 'cfi') await scheduleAnnotationContext(tx, position.annotationId, position.userId);
+      return row;
+    });
   }
 
   async findByAnnotationIds(annotationIds: number[]): Promise<AnnotationPosition[]> {
@@ -67,9 +71,13 @@ export class AnnotationPositionRepository {
   }
 
   async markPending(annotationId: number, format: AnnotationPositionFormat): Promise<void> {
-    await this.db
-      .update(annotationPositions)
-      .set({ status: 'pending', updatedAt: sql`now()` })
-      .where(and(eq(annotationPositions.annotationId, annotationId), eq(annotationPositions.format, format)));
+    await this.db.transaction(async (tx) => {
+      const rows = await tx
+        .update(annotationPositions)
+        .set({ status: 'pending', updatedAt: sql`now()` })
+        .where(and(eq(annotationPositions.annotationId, annotationId), eq(annotationPositions.format, format)))
+        .returning({ userId: annotationPositions.userId });
+      if (format === 'cfi' && rows[0]) await scheduleAnnotationContext(tx, annotationId, rows[0].userId);
+    });
   }
 }

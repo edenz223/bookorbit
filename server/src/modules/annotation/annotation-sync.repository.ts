@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { scheduleAnnotationContext } from './annotation-context.inputs';
 import { and, asc, eq, exists, getTableColumns, inArray, isNotNull, isNull, notExists, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
@@ -164,9 +165,11 @@ export class AnnotationSyncRepository {
     state: Omit<NewAnnotationSyncState, 'annotationId' | 'userId'>,
     ex: Executor = this.db,
   ): Promise<AnnotationRow> {
+    if (ex === this.db) return this.db.transaction((tx) => this.createCanonical(annotation, position, state, tx));
     const [row] = await ex.insert(annotations).values(annotation).returning();
     await ex.insert(annotationPositions).values({ ...position, annotationId: row.id, userId: row.userId });
     await ex.insert(annotationSyncState).values({ ...state, annotationId: row.id, userId: row.userId });
+    await scheduleAnnotationContext(ex, row.id, row.userId);
     return row;
   }
 
@@ -176,11 +179,13 @@ export class AnnotationSyncRepository {
     patch: Partial<Pick<AnnotationRow, 'text' | 'note' | 'color' | 'style' | 'chapterTitle' | 'deviceUpdatedAt' | 'deviceCreatedAt'>>,
     ex: Executor = this.db,
   ): Promise<number> {
+    if (ex === this.db) return this.db.transaction((tx) => this.applyContentPatch(annotationId, patch, tx));
     const [row] = await ex
       .update(annotations)
       .set({ ...patch, version: sql`${annotations.version} + 1`, updatedAt: sql`now()` })
       .where(eq(annotations.id, annotationId))
-      .returning({ version: annotations.version });
+      .returning({ version: annotations.version, userId: annotations.userId });
+    if (patch.text !== undefined) await scheduleAnnotationContext(ex, annotationId, row.userId);
     return row.version;
   }
 
@@ -190,17 +195,23 @@ export class AnnotationSyncRepository {
     patch: Partial<Pick<AnnotationPosition, 'pos0' | 'pos1' | 'status' | 'converterVersion' | 'extras' | 'bookFileId'>>,
     ex: Executor = this.db,
   ): Promise<void> {
-    await ex
+    if (ex === this.db) return this.db.transaction((tx) => this.updatePosition(annotationId, format, patch, tx));
+    const rows = await ex
       .update(annotationPositions)
       .set({ ...patch, updatedAt: sql`now()` })
-      .where(and(eq(annotationPositions.annotationId, annotationId), eq(annotationPositions.format, format)));
+      .where(and(eq(annotationPositions.annotationId, annotationId), eq(annotationPositions.format, format)))
+      .returning({ userId: annotationPositions.userId });
+    if (format === 'cfi' && rows[0]) await scheduleAnnotationContext(ex, annotationId, rows[0].userId);
   }
 
   async markPositionPending(annotationId: number, format: AnnotationPositionFormat, ex: Executor = this.db): Promise<void> {
-    await ex
+    if (ex === this.db) return this.db.transaction((tx) => this.markPositionPending(annotationId, format, tx));
+    const rows = await ex
       .update(annotationPositions)
       .set({ status: 'pending', updatedAt: sql`now()` })
-      .where(and(eq(annotationPositions.annotationId, annotationId), eq(annotationPositions.format, format)));
+      .where(and(eq(annotationPositions.annotationId, annotationId), eq(annotationPositions.format, format)))
+      .returning({ userId: annotationPositions.userId });
+    if (format === 'cfi' && rows[0]) await scheduleAnnotationContext(ex, annotationId, rows[0].userId);
   }
 
   /** Unacked sync states for one device and book, used for device-deletion detection. */
@@ -411,6 +422,7 @@ export class AnnotationSyncRepository {
   }
 
   async upsertPosition(position: NewAnnotationPosition, ex: Executor = this.db): Promise<void> {
+    if (ex === this.db) return this.db.transaction((tx) => this.upsertPosition(position, tx));
     await ex
       .insert(annotationPositions)
       .values(position)
@@ -426,6 +438,7 @@ export class AnnotationSyncRepository {
           updatedAt: new Date(),
         },
       });
+    if (position.format === 'cfi') await scheduleAnnotationContext(ex, position.annotationId, position.userId);
   }
 
   async findPositionsByAnnotationIds(

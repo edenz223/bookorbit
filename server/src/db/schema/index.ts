@@ -16,6 +16,7 @@ export * from './metadata';
 export * from './narrators';
 export * from './scanner';
 export * from './reader';
+export * from './annotation-contexts';
 export * from './oidc';
 export * from './opds';
 export * from './kobo';

@@ -12,6 +12,8 @@ import { AnnotationPositionRepository } from './annotation-position.repository';
 import { AnnotationRepository } from './annotation.repository';
 import { AnnotationService } from './annotation.service';
 import { AnnotationContextService } from './annotation-context.service';
+import { AnnotationContextRepository } from './annotation-context.repository';
+import { AnnotationContextWorker } from './annotation-context.worker';
 import { AnnotationSyncRepository } from './annotation-sync.repository';
 import { AnnotationSyncService } from './annotation-sync.service';
 import { DevicePositionRebuilderRegistry } from './device-position-rebuilder';
@@ -22,6 +24,8 @@ import { DevicePositionRebuilderRegistry } from './device-position-rebuilder';
   providers: [
     AnnotationService,
     AnnotationContextService,
+    AnnotationContextRepository,
+    AnnotationContextWorker,
     AnnotationRepository,
     AnnotationPositionRepository,
     AnnotationSyncRepository,

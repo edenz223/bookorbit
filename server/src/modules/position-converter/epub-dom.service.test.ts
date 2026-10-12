@@ -1,11 +1,11 @@
-import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdtemp, rm, stat, utimes, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import * as unzipper from 'unzipper';
 import { ZipArchive } from 'archiver';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { collapsedPointToCfi } from './position-converter.core';
+import { collapsedPointToCfi, collapsedRangeToCfi } from './position-converter.core';
 import { EpubDomService, loadChapterFromZip, readEpubSpine } from './epub-dom.service';
 import { PositionConverterService } from './position-converter.service';
 
@@ -145,5 +145,44 @@ describe('EpubDomService', () => {
     const db = makeDb(epubPath, 'pdf');
     const service = new EpubDomService(db as never);
     expect(await service.getChapter(1, 0)).toBeNull();
+  });
+
+  it('reuses context results across 50 files despite the smaller DOM cache', async () => {
+    const dom = new EpubDomService(makeDb(epubPath) as never);
+    const converter = new PositionConverterService(dom);
+    const doc = (await dom.getChapter(1, 0))!;
+    const cfi = collapsedRangeToCfi(doc, 0, 6, 13)!;
+    const sources = Array.from({ length: 50 }, (_, id) => ({
+      annotationId: id,
+      bookFileId: id + 1,
+      absolutePath: epubPath,
+      format: 'epub',
+      cfi,
+      text: 'chapter',
+    }));
+    const loader = vi.spyOn(dom, 'createChapterLoader');
+    const coldStart = performance.now();
+    const cold = await converter.getHighlightContexts(sources);
+    const coldMs = performance.now() - coldStart;
+    const warmStart = performance.now();
+    const warm = await converter.getHighlightContexts(sources);
+    const warmMs = performance.now() - warmStart;
+    expect(warm).toEqual(cold);
+    expect(warm.get(0)).toEqual({ before: 'First ', after: ' text.' });
+    expect(loader).toHaveBeenCalledTimes(50);
+    console.info(`Context fixture: cold=${coldMs.toFixed(1)}ms warm=${warmMs.toFixed(1)}ms files=50`);
+  });
+
+  it('invalidates the DOM after file changes even when the mtime is restored', async () => {
+    const path = join(dir, 'replaced.epub');
+    await buildEpub(path);
+    const dom = new EpubDomService(makeDb(path) as never);
+    const original = await dom.getChapter(1, 0);
+    const info = await stat(path);
+    await buildEpub(path, { chapter: CH1.replace('First chapter text.', 'Changed chapter text with different length.') });
+    await utimes(path, info.atime, info.mtime);
+    const updated = await dom.getChapter(1, 0);
+    expect(updated).not.toBe(original);
+    expect(updated!.index.collapsed).toBe('Changed chapter text with different length.');
   });
 });

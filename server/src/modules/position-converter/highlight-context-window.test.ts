@@ -28,6 +28,7 @@ describe('paragraph context budget', () => {
     expect(countAnnotationWords('one, two! three 😀')).toBe(3);
     expect(countAnnotationWords('阅读书籍，学习知识。')).toBeGreaterThan(1);
     expect(countAnnotationWords('one two', 'invalid_locale')).toBe(2);
+    expect(countAnnotationWords('word '.repeat(10000), 'en', 76)).toBe(76);
   });
 
   it('completes only the containing sentence for 4 through 12 words', () => {

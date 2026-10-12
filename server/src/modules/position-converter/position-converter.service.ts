@@ -5,6 +5,7 @@ import { chapterIndexFromSpineStep, findElementById, parseCfi } from './cfi.util
 import { EpubDomService } from './epub-dom.service';
 import type { EpubFileSource } from './epub-dom.service';
 import { HighlightContextChapter } from './highlight-context';
+import { HighlightContextCache, highlightFileVersion } from './highlight-context-cache';
 import {
   CfiToXPointerResult,
   ChapterDocument,
@@ -73,10 +74,15 @@ export interface NearestFragmentOutcome extends Record<string, unknown> {
 @Injectable()
 export class PositionConverterService {
   readonly version = CONVERTER_VERSION;
+  private readonly highlightContexts = new HighlightContextCache();
+  private readonly highlightChapters = new WeakMap<ChapterDocument, HighlightContextChapter>();
 
   constructor(private readonly epubDom: EpubDomService) {}
 
-  async getHighlightContexts(sources: HighlightContextSource[]): Promise<Map<number, AnnotationContext | null>> {
+  async getHighlightContexts(
+    sources: HighlightContextSource[],
+    options: { concurrency?: number; onFailure?: (annotationId: number) => void } = {},
+  ): Promise<Map<number, AnnotationContext | null>> {
     const contexts = new Map<number, AnnotationContext | null>(sources.map((source) => [source.annotationId, null]));
     const groups = new Map<string, { chapterIndex: number; sources: HighlightContextSource[] }>();
     for (const source of sources) {
@@ -89,6 +95,7 @@ export class PositionConverterService {
       groups.set(key, group);
     }
     const loaders = new Map<number, ReturnType<EpubDomService['createChapterLoader']>>();
+    const versions = new Map<number, Promise<string | null>>();
     const pending = Array.from(groups.values());
     let next = 0;
     const worker = async () => {
@@ -96,28 +103,54 @@ export class PositionConverterService {
         const group = pending[next++];
         const source = group.sources[0];
         try {
+          let versionPromise = versions.get(source.bookFileId);
+          if (!versionPromise) {
+            versionPromise = highlightFileVersion(source);
+            versions.set(source.bookFileId, versionPromise);
+          }
+          const version = await versionPromise;
+          if (!version) {
+            for (const item of group.sources) options.onFailure?.(item.annotationId);
+            continue;
+          }
+          const missing: { item: HighlightContextSource; key: string }[] = [];
+          for (const item of group.sources) {
+            const key = this.highlightContexts.key(version, item.cfi, item.text);
+            const cached = this.highlightContexts.get(key);
+            if (cached === undefined) missing.push({ item, key });
+            else contexts.set(item.annotationId, cached);
+          }
+          if (!missing.length) continue;
           let loader = loaders.get(source.bookFileId);
           if (!loader) {
-            loader = this.epubDom.createChapterLoader(source);
+            loader = options.onFailure ? this.epubDom.createChapterLoader(source, true) : this.epubDom.createChapterLoader(source);
             loaders.set(source.bookFileId, loader);
           }
           const doc = await (await loader)(group.chapterIndex);
           if (!doc) continue;
-          const chapter = new HighlightContextChapter(doc);
-          for (const item of group.sources) {
+          let chapter = this.highlightChapters.get(doc);
+          if (!chapter) {
+            chapter = new HighlightContextChapter(doc);
+            this.highlightChapters.set(doc, chapter);
+          }
+          for (const { item, key } of missing) {
             try {
-              contexts.set(item.annotationId, chapter.extract(item.cfi, item.text));
+              const context = chapter.extract(item.cfi, item.text);
+              contexts.set(item.annotationId, context);
+              this.highlightContexts.set(key, context);
             } catch {
+              options.onFailure?.(item.annotationId);
               contexts.set(item.annotationId, null);
             }
           }
         } catch {
+          for (const item of group.sources) options.onFailure?.(item.annotationId);
           // An unavailable chapter must not prevent the rest of the page from loading.
           continue;
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(4, pending.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(4, Math.max(1, options.concurrency ?? 4), pending.length) }, worker));
     return contexts;
   }
 

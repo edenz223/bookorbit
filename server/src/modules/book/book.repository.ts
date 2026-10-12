@@ -1,3 +1,4 @@
+import { notifyBookContextsChanged, notifyBookFileChanged } from '../../common/utils/book-file-events';
 import { recordBookFileHashHistory, deleteBookFilesWithHashInvalidation, deleteBooksWithHashInvalidation } from '../../db/book-file-hash-history';
 import { BadRequestException, Inject, Injectable, Optional } from '@nestjs/common';
 import { SQL, and, asc, count, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
@@ -1599,7 +1600,9 @@ export class BookRepository {
   }
 
   async deleteBookFile(fileId: number): Promise<void> {
+    const [file] = await this.db.select({ bookId: bookFiles.bookId }).from(bookFiles).where(eq(bookFiles.id, fileId)).limit(1);
     await deleteBookFilesWithHashInvalidation(this.db, eq(bookFiles.id, fileId));
+    if (file) notifyBookContextsChanged(file.bookId);
   }
 
   async updateBookFile(
@@ -1619,10 +1622,16 @@ export class BookRepository {
       .update(bookFiles)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(bookFiles.id, fileId));
+    if ([data.absolutePath, data.format, data.sizeBytes].some((value) => value !== undefined)) notifyBookFileChanged(fileId);
   }
 
   async updateBookPrimaryFile(bookId: number, primaryFileId: number | null): Promise<void> {
-    await this.db.update(books).set({ primaryFileId, updatedAt: new Date() }).where(eq(books.id, bookId));
+    const changed = await this.db
+      .update(books)
+      .set({ primaryFileId, updatedAt: new Date() })
+      .where(and(eq(books.id, bookId), sql`${books.primaryFileId} is distinct from ${primaryFileId}`))
+      .returning({ id: books.id });
+    if (changed.length) notifyBookContextsChanged(bookId);
   }
 
   async findFilesForBook(bookId: number) {

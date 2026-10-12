@@ -89,7 +89,7 @@ export interface AnnotationContext {
 
 export const ANNOTATION_COLLAPSE_WORDS = 75;
 
-export function countAnnotationWords(text: string, language = "zh"): number {
+export function countAnnotationWords(text: string, language = "zh", stopAfter = Infinity): number {
   let segmenter: Intl.Segmenter;
   try {
     segmenter = new Intl.Segmenter(language, { granularity: "word" });
@@ -99,6 +99,7 @@ export function countAnnotationWords(text: string, language = "zh"): number {
   let count = 0;
   for (const part of segmenter.segment(text)) {
     if (part.isWordLike) count += 1;
+    if (count >= stopAfter) break;
   }
   return count;
 }

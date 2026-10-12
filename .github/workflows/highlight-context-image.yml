@@ -13,7 +13,45 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    if: github.repository == 'edenz223/bookorbit' && github.ref == 'refs/heads/codex/highlight-context-50-words'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: bookorbit
+          POSTGRES_PASSWORD: context-ci-only
+          POSTGRES_DB: bookorbit_context_test_actions
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U bookorbit -d bookorbit_context_test_actions"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
+      - name: Build verification environment
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: server-builder
+          load: true
+          tags: bookorbit-context-verify:local
+          cache-from: type=gha,scope=highlight-context-verify
+          cache-to: type=gha,mode=max,scope=highlight-context-verify
+      - name: Verify migrations and annotation context persistence
+        env:
+          CONTEXT_TEST_DATABASE_URL: postgres://bookorbit:context-ci-only@127.0.0.1:5432/bookorbit_context_test_actions
+        run: |
+          docker run --rm --network host --entrypoint sh \
+            -v "$PWD/scripts/dev/verify-annotation-context.sh:/app/verify-annotation-context.sh:ro" \
+            -e DATABASE_URL="$CONTEXT_TEST_DATABASE_URL" -e CONTEXT_TEST_DATABASE_URL \
+            bookorbit-context-verify:local /app/verify-annotation-context.sh
   build:
+    needs: verify
     if: github.repository == 'edenz223/bookorbit' && github.ref == 'refs/heads/codex/highlight-context-50-words'
     runs-on: ubuntu-latest
     timeout-minutes: 45

@@ -3,7 +3,7 @@ import { ANNOTATION_COLLAPSE_WORDS, countAnnotationWords } from '@bookorbit/type
 
 export function useAnnotationExpansion(text: Ref<string>, language: Ref<string>) {
   const expanded = ref(false)
-  const collapsible = computed(() => countAnnotationWords(text.value, language.value) > ANNOTATION_COLLAPSE_WORDS)
+  const collapsible = computed(() => countAnnotationWords(text.value, language.value, ANNOTATION_COLLAPSE_WORDS + 1) > ANNOTATION_COLLAPSE_WORDS)
   const collapsed = computed(() => collapsible.value && !expanded.value)
 
   watch(text, () => {

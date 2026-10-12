@@ -48,7 +48,7 @@ export class HighlightContextWindow {
   }
 
   extract(start: number, end: number): AnnotationContext {
-    const policy = highlightContextPolicy(countAnnotationWords(this.characters.slice(start, end).join(''), this.language));
+    const policy = highlightContextPolicy(countAnnotationWords(this.characters.slice(start, end).join(''), this.language, 61));
     if (!policy.budget) return { before: '', after: '' };
     const length = this.characters.length;
     if (policy.wholeParagraph && start + length - end <= policy.budget) return this.context(0, start, end, length);

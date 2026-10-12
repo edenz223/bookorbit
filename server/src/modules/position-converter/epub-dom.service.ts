@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { stat } from 'fs/promises';
 import { eq } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -111,6 +111,8 @@ interface SpineCacheEntry {
   absolutePath: string;
   format: string;
   mtimeMs: number;
+  ctimeMs: number;
+  size: number;
   spine: EpubSpine;
 }
 
@@ -143,17 +145,22 @@ export class EpubDomService {
     return this.getChapterFromEntry(bookFileId, chapterIndex, entry);
   }
 
-  async createChapterLoader(file: EpubFileSource): Promise<(chapterIndex: number) => Promise<ChapterDocument | null>> {
-    const entry = await this.getSpineEntry(file.bookFileId, file);
-    return (chapterIndex) => this.getChapterFromEntry(file.bookFileId, chapterIndex, entry);
+  async createChapterLoader(file: EpubFileSource, strict = false): Promise<(chapterIndex: number) => Promise<ChapterDocument | null>> {
+    const entry = await this.getSpineEntry(file.bookFileId, file, strict);
+    return (chapterIndex) => this.getChapterFromEntry(file.bookFileId, chapterIndex, entry, strict);
   }
 
-  private async getChapterFromEntry(bookFileId: number, chapterIndex: number, entry: SpineCacheEntry | null): Promise<ChapterDocument | null> {
+  private async getChapterFromEntry(
+    bookFileId: number,
+    chapterIndex: number,
+    entry: SpineCacheEntry | null,
+    strict = false,
+  ): Promise<ChapterDocument | null> {
     if (!entry) return null;
     const href = entry.spine.hrefs[chapterIndex];
     if (href == null) return null;
 
-    const cacheKey = `${bookFileId}:${entry.format}:${entry.mtimeMs}:${chapterIndex}`;
+    const cacheKey = JSON.stringify([bookFileId, entry.absolutePath, entry.format, entry.mtimeMs, entry.ctimeMs, entry.size, chapterIndex]);
     const cached = this.chapterCache.get(cacheKey);
     if (cached) {
       this.chapterCache.delete(cacheKey);
@@ -173,11 +180,12 @@ export class EpubDomService {
       return doc;
     } catch (error) {
       this.logFail(bookFileId, error);
+      if (strict) throw new ServiceUnavailableException('EPUB chapter could not be loaded');
       return null;
     }
   }
 
-  private async getSpineEntry(bookFileId: number, source?: EpubFileSource): Promise<SpineCacheEntry | null> {
+  private async getSpineEntry(bookFileId: number, source?: EpubFileSource, strict = false): Promise<SpineCacheEntry | null> {
     const [file] = source
       ? [source]
       : await this.db
@@ -188,20 +196,32 @@ export class EpubDomService {
     if (!file || (file.format !== 'epub' && file.format !== 'kepub')) return null;
 
     let mtimeMs: number;
+    let ctimeMs: number;
+    let size: number;
     try {
-      mtimeMs = (await stat(file.absolutePath)).mtimeMs;
+      const info = await stat(file.absolutePath);
+      ({ mtimeMs, ctimeMs, size } = info);
     } catch (error) {
       this.logFail(bookFileId, error);
+      if (strict) throw new ServiceUnavailableException('EPUB file could not be accessed');
       return null;
     }
 
     const cached = this.spineCache.get(bookFileId);
-    if (cached && cached.absolutePath === file.absolutePath && cached.format === file.format && cached.mtimeMs === mtimeMs) return cached;
+    if (
+      cached &&
+      cached.absolutePath === file.absolutePath &&
+      cached.format === file.format &&
+      cached.mtimeMs === mtimeMs &&
+      cached.ctimeMs === ctimeMs &&
+      cached.size === size
+    )
+      return cached;
 
     try {
       const zip = await unzipper.Open.file(file.absolutePath);
       const spine = await readEpubSpine(zip);
-      const entry: SpineCacheEntry = { absolutePath: file.absolutePath, format: file.format, mtimeMs, spine };
+      const entry: SpineCacheEntry = { absolutePath: file.absolutePath, format: file.format, mtimeMs, ctimeMs, size, spine };
       this.spineCache.set(bookFileId, entry);
       while (this.spineCache.size > SPINE_CACHE_MAX) {
         const oldest = this.spineCache.keys().next().value as number;
@@ -210,6 +230,7 @@ export class EpubDomService {
       return entry;
     } catch (error) {
       this.logFail(bookFileId, error);
+      if (strict) throw new ServiceUnavailableException('EPUB file could not be parsed');
       return null;
     }
   }

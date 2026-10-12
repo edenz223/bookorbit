@@ -1,3 +1,4 @@
+import { notifyBookFileChanged } from '../../common/utils/book-file-events';
 import { recordBookFileHashHistory } from '../../db/book-file-hash-history';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, isNull, ne, sql } from 'drizzle-orm';
@@ -151,6 +152,7 @@ export class FileWriteRepository {
 
     if (fields.fileHash === undefined || fields.fileHash === previousFileHash) {
       await updateFile(this.db);
+      notifyBookFileChanged(bookFileId);
       return;
     }
 
@@ -173,6 +175,7 @@ export class FileWriteRepository {
           AND snapshot.file_hash IS NOT DISTINCT FROM ${previousFileHash}
       `);
     });
+    notifyBookFileChanged(bookFileId);
   }
 
   async recordHashHistory(bookFileId: number, fileHash: string, reason: string): Promise<void> {

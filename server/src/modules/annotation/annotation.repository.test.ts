@@ -75,6 +75,7 @@ function makeDb(...results: unknown[]) {
     insert: vi.fn().mockImplementation(next),
     update: vi.fn().mockImplementation(next),
     delete: vi.fn().mockImplementation(next),
+    execute: vi.fn().mockResolvedValue({ rows: [], rowCount: 1 }),
     transaction: vi.fn().mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(db)),
     _queries: queries,
   };
