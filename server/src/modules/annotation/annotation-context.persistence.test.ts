@@ -173,6 +173,18 @@ describe.skipIf(!databaseUrl)('annotation context PostgreSQL persistence', () =>
     expect(await repository.getStored(userId, [row.id])).toEqual([]);
   });
 
+  it('hides obsolete algorithm results and restarts backfill for the new version', async () => {
+    const row = await create();
+    await worker.tick();
+    const generation = (await contextRow(row.id)).generation;
+    await db.update(schema.annotationContexts).set({ algorithmVersion: 0 }).where(eq(schema.annotationContexts.annotationId, row.id));
+    await db.update(schema.annotationContextMaintenance).set({ algorithmVersion: 0 }).where(eq(schema.annotationContextMaintenance.name, 'backfill'));
+    expect(await repository.getStored(userId, [row.id])).toEqual([]);
+    expect(await repository.backfill(randomUUID())).toMatchObject({ scanned: 1, queued: 1 });
+    expect(await contextRow(row.id)).toMatchObject({ status: 'pending', algorithmVersion: 1, generation: generation + 1 });
+    await worker.tick();
+    expect(await repository.getStored(userId, [row.id])).toHaveLength(1);
+  });
   it('does not invalidate context for note, color or star changes', async () => {
     const row = await create();
     await worker.tick();
