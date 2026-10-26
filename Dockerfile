@@ -10,9 +10,10 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY patches/ ./patches/
 COPY packages/types/package.json ./packages/types/
+COPY packages/plugin-api/package.json ./packages/plugin-api/
 COPY client/package.json ./client/
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --filter client... --frozen-lockfile
+    pnpm install --fetch-timeout=600000 --network-concurrency=4 --filter client... --frozen-lockfile
 
 COPY packages/ ./packages/
 COPY client/ ./client/
@@ -31,9 +32,10 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY patches/ ./patches/
 COPY packages/types/package.json ./packages/types/
+COPY packages/plugin-api/package.json ./packages/plugin-api/
 COPY server/package.json ./server/
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --filter server... --frozen-lockfile
+    pnpm install --fetch-timeout=600000 --network-concurrency=4 --filter server... --frozen-lockfile
 
 COPY packages/ ./packages/
 COPY server/ ./server/
@@ -58,7 +60,7 @@ COPY server/requirements/kobo-cloudscraper.txt /tmp/kobo-cloudscraper-requiremen
 # pip is build-only here. Leaving it installed also leaves pip/_vendor/vendor.txt,
 # which Trivy reads as installed msgpack and setuptools and fails the image scan on.
 RUN apk upgrade --no-cache && \
-    apk add --no-cache poppler-utils su-exec ffmpeg python3 py3-pip tini tzdata && \
+    apk add --no-cache 'libexpat>=2.9.0-r0' poppler-utils djvulibre util-linux su-exec ffmpeg python3 py3-pip tini tzdata && \
     python3 -m venv /opt/bookorbit-python && \
     /opt/bookorbit-python/bin/python -m pip install --no-cache-dir -r /tmp/kobo-cloudscraper-requirements.txt && \
     /opt/bookorbit-python/bin/python -m pip uninstall -y pip && \

@@ -46,12 +46,31 @@ jobs:
         env:
           CONTEXT_TEST_DATABASE_URL: postgres://bookorbit:context-ci-only@127.0.0.1:5432/bookorbit_context_test_actions
         run: |
-          docker run --rm --network host --entrypoint sh \
+          docker run --rm -e NODE_OPTIONS=--max-old-space-size=6144 --network host --entrypoint sh \
             -v "$PWD/scripts/dev/verify-annotation-context.sh:/app/verify-annotation-context.sh:ro" \
             -e DATABASE_URL="$CONTEXT_TEST_DATABASE_URL" -e CONTEXT_TEST_DATABASE_URL \
             bookorbit-context-verify:local /app/verify-annotation-context.sh
+  verify-client:
+    if: github.repository == 'edenz223/bookorbit' && github.ref == 'refs/heads/codex/highlight-context-50-words'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003
+      - name: Build and verify client
+        run: |
+          docker build --target client-builder -t bookorbit-context-client:verify .
+          docker run --rm -e NODE_OPTIONS=--max-old-space-size=6144 --entrypoint sh bookorbit-context-client:verify -c '
+            set -eu
+            cd /app/client
+            pnpm --config.verify-deps-before-run=false run type-check
+            pnpm --config.verify-deps-before-run=false run lint:check
+            pnpm --config.verify-deps-before-run=false exec vitest run src/features/annotations src/features/book/composables/useBookHighlights.test.ts
+          '
   build:
-    needs: verify
+    needs: [verify, verify-client]
     if: github.repository == 'edenz223/bookorbit' && github.ref == 'refs/heads/codex/highlight-context-50-words'
     runs-on: ubuntu-latest
     timeout-minutes: 45

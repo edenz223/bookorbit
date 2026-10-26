@@ -1,5 +1,6 @@
 @import '@fontsource-variable/inter';
 @import '@fontsource-variable/fraunces';
+@import '@fontsource-variable/fraunces/wght-italic.css';
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
@@ -253,22 +254,28 @@
   mask-size: 150px 150px;
 }
 
-.glow-wrapper {
-  background-image: var(--glow-image);
-  background-position: top;
-  background-repeat: no-repeat;
-  background-size: auto calc(var(--glow-band) * var(--glow-reach));
+/* A zero-height flow item at the top of the main inset. Being in flow, it spans the inset's content box,
+   which ends at the sidebar's edge, so the glow centres on the main column and follows the sidebar as it
+   resizes or collapses. Its layers sit at a negative z-index, under the shell's content like the
+   background patterns. The texture is a layer of its own so its tiles keep their size; the reach only
+   moves the fade. */
+.shell-glow {
+  position: relative;
+  flex: none;
+  height: 0;
 }
 
-/* The texture sits on its own layer so its tiles keep their size; the reach only moves the fade. Negative
-   z-index keeps it under the shell's content and the glow, like the background patterns. */
-.glow-wrapper::after {
+.shell-glow::before,
+.shell-glow::after {
   content: '';
   position: absolute;
   inset: 0 0 auto;
   z-index: -1;
   height: calc(var(--glow-band) * var(--glow-reach));
   pointer-events: none;
+}
+
+.shell-glow::before {
   background-image: var(--glow-texture);
   background-position: top center;
   background-size: var(--glow-texture-size);
@@ -276,12 +283,13 @@
   mask-image: radial-gradient(ellipse 62% 100% at 50% 0%, #000 0%, transparent 100%);
 }
 
-html[data-glow='off'] .glow-wrapper {
-  background-image: none;
+.shell-glow::after {
+  background-image: var(--glow-image);
+  background-repeat: no-repeat;
 }
 
-html[data-glow='off'] .glow-wrapper::after {
-  content: none;
+html[data-glow='off'] .shell-glow {
+  display: none;
 }
 
 @layer base {

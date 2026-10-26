@@ -11,6 +11,7 @@ import { buildPatternTokens, patternReferencesToken } from '../../common/utils/p
 import { selectPrimaryFileKeepingCurrent } from '../../common/utils/primary-file-selection.utils';
 
 import { DB } from '../../db';
+import { realignAudioTrackOrder } from '../../db/audio-track-order';
 import * as schema from '../../db/schema';
 import { books, bookFiles, libraries, libraryFolders } from '../../db/schema';
 import type { RequestUser } from '../../common/types/request-user';
@@ -261,6 +262,8 @@ export class UploadService {
       const ino = fileStat.ino;
       const relPath = relative(bookRow.libraryFolderPath, destination);
       const mediaOverlayFields = await this.inspectMediaOverlayFields(destination, format);
+      // The transaction callback cannot see the narrowing of the outer `let`.
+      const absolutePath = destination;
 
       const { inserted, isPrimary, finalStatus } = await this.db.transaction(async (tx) => {
         const [lockedBook] = await tx
@@ -282,7 +285,7 @@ export class UploadService {
           .values({
             bookId,
             libraryFolderId: bookRow.libraryFolderId,
-            absolutePath: destination,
+            absolutePath,
             relPath,
             ino,
             sizeBytes,
@@ -303,6 +306,8 @@ export class UploadService {
           });
 
         if (!inserted) throw new Error('Failed to insert book file record');
+        // A track added by hand has no number yet, which would play it after every other track.
+        if (isAudioFormat(format)) await realignAudioTrackOrder(tx, bookId);
 
         const contentFiles = await tx
           .select({
@@ -385,7 +390,7 @@ export class UploadService {
 
     if (!bookRow) throw new NotFoundException(`Book ${bookId} not found`);
 
-    await this.libraryService.verifyUserAccess(user.id, bookRow.libraryId, user.isSuperuser);
+    await this.libraryService.verifyUserAccessLevel(user.id, bookRow.libraryId, user.isSuperuser, 'editor');
 
     const fileRenameService = this.resolveFileRenameService();
     if (!fileRenameService) {

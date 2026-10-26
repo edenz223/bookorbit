@@ -5,10 +5,13 @@ import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import type { RequestUser } from '../../common/types/request-user';
 import type { NewEmailSendLog } from '../../db/schema';
 import { EMAIL_SEND_STATUS_PENDING } from './email-send.constants';
-import { EmailSendLogRepository } from './email-send-log.repository';
+import { EmailSendLogRepository, type EmailLogFilter } from './email-send-log.repository';
 
 export const MAX_SEND_ATTEMPTS = 3;
 export const SEND_RETRY_DELAYS_MS = [30_000, 120_000];
+/** How far back the settings page looks for failures still worth a fix. */
+export const ATTENTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const ATTENTION_LIMIT = 20;
 const EMAIL_SEND_LOG_BOOTSTRAP_EVENT = 'email.send-log.bootstrap-cleanup';
 
 @Injectable()
@@ -46,8 +49,16 @@ export class EmailSendLogService implements OnApplicationBootstrap {
     return { isFinal };
   }
 
-  async findForUser(user: RequestUser, page: number, size: number, bookId?: number) {
-    return this.repo.findForUser(user.id, size, page * size, bookId);
+  async findForUser(user: RequestUser, page: number, size: number, filter: EmailLogFilter = {}) {
+    return this.repo.findForUser(user.id, size, page * size, filter);
+  }
+
+  summary(user: RequestUser) {
+    return this.repo.countForUser(user.id);
+  }
+
+  findAttention(user: RequestUser) {
+    return this.repo.findUnresolvedFailures(user.id, new Date(Date.now() - ATTENTION_WINDOW_MS), ATTENTION_LIMIT);
   }
 
   async findAllAdmin(page: number, size: number) {

@@ -155,7 +155,7 @@ Read the full walkthrough at **[bookorbit.app/my-workflow](https://bookorbit.app
 
 The BookOrbit plugin for KOReader adds progress sync, two-way annotation sync, and a native catalog browser: navigate, search, and download books from your library without leaving the device.
 
-![BookOrbit KOReader Plugin showing dashboard, catalog search, and book details](docs/images/koreader-plugin-preview.png)
+![BookOrbit KOReader Plugin on unbranded e-readers showing Home, book details, catalog browsing, dashboard customization, series, and navigation](docs/images/koreader-plugin-preview.webp)
 
 1. In BookOrbit, go to **Settings > KOReader**, create credentials if prompted, and click **Download Plugin**.
 2. Unzip `bookorbit.koplugin.zip`.
@@ -201,10 +201,13 @@ When adding user-facing text in code, add the Vue I18n key only to `client/src/l
 ## Support
 
 - **Support development:** [Open Collective](https://opencollective.com/bookorbit)
-- **Questions and discussion:** [GitHub Discussions](https://github.com/bookorbit/bookorbit/discussions)
+- **Questions and help:** [Ask in GitHub Issues](https://github.com/bookorbit/bookorbit/issues/new?template=question.yml) or [browse help requests](https://github.com/bookorbit/bookorbit/issues?q=is%3Aissue%20label%3Asupport).
+- **Community conversations:** [Start a conversation](https://github.com/bookorbit/bookorbit/issues/new?template=discussion.yml) or [browse community topics](https://github.com/bookorbit/bookorbit/issues?q=is%3Aissue%20label%3Adiscussion).
 - **Bug reports:** [GitHub Issues](https://github.com/bookorbit/bookorbit/issues/new?template=bug_report.yml)
 - **Feature requests:** [GitHub Issues](https://github.com/bookorbit/bookorbit/issues/new?template=feature_request.yml)
 - **Security vulnerabilities:** Follow the private reporting process in the [Security Policy](.github/SECURITY.md).
+
+Questions are welcome, even if you are unsure whether something is a bug. Share workflows, your setup, or companion apps in community conversations. See the [community guide](docs/COMMUNITY.md) for choosing a category and how topics are handled.
 
 ## License and Attribution
 

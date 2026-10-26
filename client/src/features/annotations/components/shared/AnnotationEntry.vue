@@ -21,6 +21,7 @@ import { formatDate } from '@/i18n/formatters'
 import { formatChipStyle } from '@/features/book/lib/format-colors'
 import AnnotationBookThumb from '../AnnotationBookThumb.vue'
 import { useAnnotationExpansion } from '../../composables/useAnnotationExpansion'
+import { annotationSourceKey } from '@/features/annotations/lib/source-label'
 
 type EntryAnnotation = AnnotationItem | AnnotationHubItem
 
@@ -287,7 +288,7 @@ function handlePurge() {
           </span>
           <span v-if="locationLabel" class="shrink-0 text-[10px] font-semibold leading-[14px] text-muted-foreground">{{ locationLabel }}</span>
           <span class="inline-flex shrink-0 items-center gap-1 text-[10px] leading-[14px]" :style="{ color: `var(--pill-${annotation.origin})` }">
-            {{ t(`annotations.sources.${annotation.origin}`) }}
+            {{ t(annotationSourceKey(annotation.origin)) }}
           </span>
           <span
             v-if="format"

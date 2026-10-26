@@ -1,5 +1,6 @@
 import { notifyBookContextsChanged, notifyBookFileChanged } from '../../common/utils/book-file-events';
-import { deleteBookFilesWithHashInvalidation, deleteBooksWithHashInvalidation } from '../../db/book-file-hash-history';
+import { realignAudioTrackOrder } from '../../db/audio-track-order';
+import { recordBookFileHashHistory, deleteBookFilesWithHashInvalidation, deleteBooksWithHashInvalidation } from '../../db/book-file-hash-history';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -110,6 +111,7 @@ export class ScannerRepository {
         allowedFormats: libraries.allowedFormats,
         formatPriority: libraries.formatPriority,
         metadataPrecedence: libraries.metadataPrecedence,
+        regexMetadata: libraries.regexMetadata,
         excludePatterns: libraries.excludePatterns,
         organizationMode: libraries.organizationMode,
         addedAtSource: libraries.addedAtSource,
@@ -127,6 +129,15 @@ export class ScannerRepository {
   async findLibraryName(libraryId: number): Promise<string | null> {
     const [row] = await this.db.select({ name: libraries.name }).from(libraries).where(eq(libraries.id, libraryId)).limit(1);
     return row?.name ?? null;
+  }
+
+  async hasLibraryAccess(userId: number, libraryId: number): Promise<boolean> {
+    const [row] = await this.db
+      .select({ userId: userLibraryAccess.userId })
+      .from(userLibraryAccess)
+      .where(and(eq(userLibraryAccess.userId, userId), eq(userLibraryAccess.libraryId, libraryId)))
+      .limit(1);
+    return row !== undefined;
   }
 
   async findLibraryAccessibleUserIds(libraryId: number): Promise<number[]> {
@@ -252,6 +263,7 @@ export class ScannerRepository {
         mtime: bookFiles.mtime,
         fileHash: bookFiles.fileHash,
         format: bookFiles.format,
+        role: bookFiles.role,
         sortOrder: bookFiles.sortOrder,
         durationSeconds: bookFiles.durationSeconds,
         mediaOverlayAvailable: bookFiles.mediaOverlayAvailable,
@@ -283,11 +295,41 @@ export class ScannerRepository {
   }
 
   async updateBookFile(id: number, data: Partial<typeof bookFiles.$inferInsert>) {
-    const [file] = await this.db
-      .update(bookFiles)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(bookFiles.id, id))
-      .returning();
+    const file = await this.db.transaction(async (tx) => {
+      if (data.fileHash) {
+        const [previous] = await tx.select({ fileHash: bookFiles.fileHash }).from(bookFiles).where(eq(bookFiles.id, id)).for('update');
+        if (previous?.fileHash && previous.fileHash !== data.fileHash) {
+          await recordBookFileHashHistory(tx, id, previous.fileHash, 'rescan');
+          // Positions from the replaced bytes cannot be interpreted in the new DOM.
+          await tx
+            .update(schema.readingProgress)
+            .set({
+              cfi: null,
+              koreaderProgress: null,
+              pageNumber: null,
+              positionSeconds: null,
+              mediaOverlayFragment: null,
+              mediaOverlaySectionIndex: null,
+              updatedAt: sql`${schema.readingProgress.updatedAt}`,
+            })
+            .where(eq(schema.readingProgress.bookFileId, id));
+          await tx
+            .update(koreaderDeviceProgress)
+            .set({
+              progress: null,
+              chapterIndex: null,
+              updatedAt: sql`${koreaderDeviceProgress.updatedAt}`,
+            })
+            .where(eq(koreaderDeviceProgress.bookFileId, id));
+        }
+      }
+      const [file] = await tx
+        .update(bookFiles)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(bookFiles.id, id))
+        .returning();
+      return file;
+    });
     if (file && [data.mtime, data.sizeBytes, data.absolutePath, data.fileHash, data.format].some((value) => value !== undefined))
       notifyBookFileChanged(id);
     return file;
@@ -448,6 +490,10 @@ export class ScannerRepository {
       }
       return { bookmarks: bookmarksUpdated, progress: progressUpdated };
     });
+  }
+
+  realignAudioTrackOrder(bookId: number): Promise<number> {
+    return this.db.transaction((tx) => realignAudioTrackOrder(tx, bookId));
   }
 
   async findBookFilesByBookIds(bookIds: number[]): Promise<(typeof bookFiles.$inferSelect)[]> {
@@ -650,6 +696,7 @@ export class ScannerRepository {
       this.db
         .select({
           id: books.id,
+          libraryId: books.libraryId,
           status: books.status,
           coverAspectRatio: libraries.coverAspectRatio,
           formatPriority: libraries.formatPriority,

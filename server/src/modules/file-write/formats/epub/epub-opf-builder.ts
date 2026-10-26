@@ -32,6 +32,7 @@ type OrderedNode = Record<string, unknown>;
 
 const EPUB_WRITABLE_FIELDS = new Set<BookWritePayloadKey>(EPUB_BOOK_FILE_WRITE_FIELDS);
 const CUSTOM_METADATA_PREFIX = `${APP_WRITE_NAMESPACE}:custom:`;
+const OPF_NS_URI = 'http://www.idpf.org/2007/opf';
 const DC_NS_URI = 'http://purl.org/dc/elements/1.1/';
 const MAIN_TITLE_ID = 't-main';
 const SUBTITLE_ID = 't-sub';
@@ -378,11 +379,18 @@ export function build(opfXml: string, payload: BookWritePayload): { newOpfXml: s
     }
   }
 
+  // An unprefixed <package> without a default namespace (epubBuilder writes `mlns=` for `xmlns=`)
+  // leaves every package element in no namespace. Once xmlns:opf is bound below, namespace-aware
+  // readers such as foliate look for OPF elements by namespace and find no <spine>.
+  if (!pkgTag.includes(':') && !attr(pkgAttrs, '@_xmlns')) {
+    pkgAttrs['@_xmlns'] = OPF_NS_URI;
+  }
+
   // Ensure xmlns:opf is declared so opf:scheme attributes on dc:identifier (and opf:role/opf:file-as
   // on dc:creator in EPUB2) resolve to a bound namespace. Many EPUB3 files omit this declaration;
   // adding it to <package> is valid and covers the whole subtree.
   if (!attr(pkgAttrs, '@_xmlns:opf')) {
-    pkgAttrs['@_xmlns:opf'] = 'http://www.idpf.org/2007/opf';
+    pkgAttrs['@_xmlns:opf'] = OPF_NS_URI;
   }
 
   // Some EPUBs scope xmlns:dc to each dc:* element. Rebuilding metadata removes those

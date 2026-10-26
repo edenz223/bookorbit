@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 
 import type { RequestUser } from '../../common/types/request-user';
 import { EmailRecipientRepository } from './email-recipient.repository';
+import { EmailPreferencesRepository } from './email-preferences.repository';
+import { EmailSendLogRepository } from './email-send-log.repository';
 import { EmailTemplateService } from './email-template.service';
 import { CreateEmailRecipientDto } from './dto/create-email-recipient.dto';
 import { UpdateEmailRecipientDto } from './dto/update-email-recipient.dto';
@@ -13,10 +15,15 @@ export class EmailRecipientService {
   constructor(
     private readonly repo: EmailRecipientRepository,
     private readonly templateService: EmailTemplateService,
+    private readonly preferences: EmailPreferencesRepository,
+    private readonly sendLog: EmailSendLogRepository,
   ) {}
 
-  findAll(user: RequestUser) {
-    return this.repo.findAllForUser(user.id);
+  /** Each recipient with the last book sent to it, so the settings page can show what arrived. */
+  async findAll(user: RequestUser) {
+    const [recipients, lastSends] = await Promise.all([this.repo.findAllForUser(user.id), this.sendLog.findLastSendPerRecipient(user.id)]);
+    const lastByRecipient = new Map(lastSends.map(({ recipientId, ...last }) => [recipientId, last]));
+    return recipients.map((recipient) => ({ ...recipient, lastSend: lastByRecipient.get(recipient.id) ?? null }));
   }
 
   async findOne(id: number, user: RequestUser) {
@@ -71,7 +78,8 @@ export class EmailRecipientService {
 
   async setDefault(id: number, user: RequestUser) {
     await this.getOwnedById(id, user);
-    const updated = (await this.repo.setDefault(id, user.id)).find((recipient) => recipient.id === id);
+    await this.preferences.setDefaults(user.id, { defaultRecipientId: id });
+    const [updated] = await this.repo.findById(id);
     if (!updated) throw new NotFoundException('Recipient not found');
     return updated;
   }

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { AnnotationContext } from '@bookorbit/types';
 
-import { chapterIndexFromSpineStep, findElementById, parseCfi } from './cfi.utils';
+import { chapterIndexFromSpineStep, compareCfi, findElementById, parseCfi } from './cfi.utils';
 import { EpubDomService } from './epub-dom.service';
 import type { EpubFileSource } from './epub-dom.service';
 import { HighlightContextChapter } from './highlight-context';
@@ -187,7 +187,7 @@ export class PositionConverterService {
    * Converts a collapsed point CFI to a single xpointer. Dogears have no highlighted
    * text to repair against, so this is structural only: it resolves or it fails.
    */
-  async cfiPointToXpointer(params: { bookFileId: number; cfi: string }): Promise<CfiToXPointerOutcome> {
+  async cfiPointToXpointer(params: { bookFileId: number; cfi: string; sourceBookFileId?: number }): Promise<CfiToXPointerOutcome> {
     const parsed = parseCfi(params.cfi);
     if (!parsed) return { status: 'failed', reason: 'unparsable_cfi' };
     const chapterIndex = chapterIndexFromSpineStep(parsed.spineStep);
@@ -195,6 +195,15 @@ export class PositionConverterService {
 
     const doc = await this.epubDom.getChapter(params.bookFileId, chapterIndex);
     if (!doc) return { status: 'failed', reason: 'chapter_unavailable', chapterIndex };
+
+    if (params.sourceBookFileId != null && params.sourceBookFileId !== params.bookFileId) {
+      const source = await this.epubDom.getChapter(params.sourceBookFileId, chapterIndex);
+      const point = source ? cfiPointToCollapsedCp(source, params.cfi) : null;
+      const mapped = source && point != null ? this.mapEquivalentChapterPoint(source, doc, point) : null;
+      if (mapped == null) return { status: 'failed', reason: 'chapter_text_mismatch', chapterIndex };
+      const pos = collapsedPointToXPointer(doc, chapterIndex, mapped);
+      return pos ? { status: 'repaired', pos0: pos, chapterIndex } : { status: 'failed', reason: 'unresolvable_structure', chapterIndex };
+    }
 
     const pos = cfiPointToXPointer(doc, chapterIndex, params.cfi);
     if (!pos) return { status: 'failed', reason: 'unresolvable_structure', chapterIndex };
@@ -213,6 +222,11 @@ export class PositionConverterService {
     const result: CfiToXPointerResult = cfiRangeToXPointer(doc, chapterIndex, params.cfi, params.text);
     if (result.status === 'failed') return { status: 'failed', reason: result.reason, chapterIndex };
     return { status: result.status, pos0: result.pos0, pos1: result.pos1, chapterIndex };
+  }
+
+  /** Orders two CFIs by reading position: negative when `a` comes first, null when either cannot be read. */
+  compareCfi(a: string, b: string): number | null {
+    return compareCfi(a, b);
   }
 
   async fragmentToPositions(params: {

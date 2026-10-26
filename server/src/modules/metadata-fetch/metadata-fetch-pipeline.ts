@@ -220,7 +220,11 @@ export class MetadataFetchPipeline {
     const searchProviders = [...providerSelection.activeProviders, ...providerSelection.throttledProviders];
     const searchOptions = this.searchOptions(options?.cacheDirective, providerSelection.throttledProviders);
     const coverOnlyProviders = this.coverOnlyProviders(preferences, scope.media, searchProviders);
-    const providerSearchParams = existingProviderIdsOnly ? { ...params, existingProviderIdsOnly: true } : params;
+    const providerSearchParams = {
+      ...params,
+      ...(searchProviders.includes(MetadataProviderKey.COMICVINE) ? { requireUnambiguousMatch: true } : {}),
+      ...(existingProviderIdsOnly ? { existingProviderIdsOnly: true } : {}),
+    };
     const searchParams = searchProviders.some((provider) => this.registry.servesOnlyAudiobooks(provider))
       ? { ...providerSearchParams, includeAudiobookProviders: true }
       : providerSearchParams;

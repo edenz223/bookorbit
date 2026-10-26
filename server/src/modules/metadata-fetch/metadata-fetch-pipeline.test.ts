@@ -1205,11 +1205,43 @@ describe('MetadataFetchPipeline', () => {
 
     const { resolved } = await pipeline.runWithSources({ title: 'Arkham Asylum #12' }, {});
 
+    expect(fetchService.searchCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ requireUnambiguousMatch: true }),
+      expect.arrayContaining([MetadataProviderKey.COMICVINE]),
+    );
+
     expect(resolved.comicMetadata).toEqual({
       issueNumber: '12',
       volumeName: 'Arkham Asylum',
       pencillers: ['Jock'],
     });
+  });
+
+  it('requires unambiguous ComicVine matches even when callers request one candidate or disable the safeguard', async () => {
+    const prefs = createPreferences((fields) => {
+      for (const field of ALL_METADATA_FIELDS) fields[field].providers = [MetadataProviderKey.COMICVINE];
+    });
+    preferencesService.getGlobal.mockResolvedValue(prefs);
+    resolver.resolve.mockReturnValue(prefs);
+    resolver.withForwardCompatibility.mockReturnValue(prefs);
+    registry.all.mockReturnValue([{ key: MetadataProviderKey.COMICVINE }] as never);
+    fetchService.searchCandidates.mockReturnValue(of());
+
+    const { resolved, providerIds } = await pipeline.runWithSources(
+      {
+        title: 'Generation X #01',
+        maxCandidatesPerProvider: 1,
+        requireUnambiguousMatch: false,
+      },
+      {},
+    );
+
+    expect(fetchService.searchCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ requireUnambiguousMatch: true, maxCandidatesPerProvider: 1 }),
+      [MetadataProviderKey.COMICVINE],
+    );
+    expect(resolved).toEqual({});
+    expect(providerIds).toEqual({});
   });
 
   it('merges genres from selected providers when genre merge mode is enabled', async () => {

@@ -63,5 +63,19 @@ export function useEmailRecipients() {
     recipients.value = recipients.value.map((r) => ({ ...r, isDefault: r.id === updated.id ? updated.isDefault : false }))
   }
 
-  return { recipients, fetchRecipients, createRecipient, updateRecipient, deleteRecipient, setDefaultRecipient }
+  /** Sends a plain message without a book. The subject and text come from the caller's locale. */
+  async function sendTestEmail(id: number, subject: string, text: string): Promise<{ success: boolean; error?: string }> {
+    const res = await api(`/api/v1/email/recipients/${id}/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, text }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error((err as { message?: string }).message ?? 'Failed to send test email')
+    }
+    return res.json()
+  }
+
+  return { recipients, fetchRecipients, createRecipient, updateRecipient, deleteRecipient, setDefaultRecipient, sendTestEmail }
 }

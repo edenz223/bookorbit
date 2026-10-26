@@ -12,6 +12,7 @@ import type {
 } from '@bookorbit/types';
 
 import * as schema from '../src/db/schema';
+import { IndexerConfigService } from '../src/modules/book-request/indexers/indexer-config.service';
 import {
   authHeader,
   closeAuthorizationMatrixE2EContext,
@@ -1081,6 +1082,101 @@ describe('Book requests (e2e)', () => {
 
         expect(response.statusCode).toBe(403);
         expect(response.json()).toMatchObject({ errorCode: 'SUBMIT_LIBRARY_FORBIDDEN' });
+      },
+      SCENARIO_TIMEOUT_MS,
+    );
+  });
+  describe('managed source seed policy', () => {
+    it(
+      'honors the current manager toggle over unsynchronized legacy source rows',
+      async () => {
+        const [manager] = await ctx.db
+          .insert(schema.requestIndexerManagers)
+          .values({
+            name: `seed-policy-manager-${randomUUID()}`,
+            type: 'prowlarr',
+            baseUrl: 'http://127.0.0.1:9696',
+            credentialsEnc: 'unused-fixture-credential',
+            inheritSeedLimits: true,
+          })
+          .returning();
+        try {
+          const [source] = await ctx.db
+            .insert(schema.requestIndexers)
+            .values({
+              name: `seed-policy-source-${randomUUID()}`,
+              adapterType: 'torznab',
+              baseUrl: 'http://127.0.0.1:9696/1',
+              managerId: manager.id,
+              managerExternalId: '1',
+              managerMetadata: { displayName: 'Seed policy fixture', implementation: 'Torznab', protocol: 'torrent', priority: 25 },
+              applyTrackerSeedGoals: true,
+              seedRatioGoal: 1,
+              seedTimeMinutes: 4320,
+            })
+            .returning();
+          const service = ctx.app.get(IndexerConfigService);
+          await expect(service.resolveSeedPolicy(source.id)).resolves.toMatchObject({
+            applyTrackerSeedGoals: true,
+            seedRatioGoal: 1,
+            seedTimeMinutes: 4320,
+          });
+
+          await ctx.db
+            .update(schema.requestIndexerManagers)
+            .set({ inheritSeedLimits: false })
+            .where(eq(schema.requestIndexerManagers.id, manager.id));
+          await expect(service.resolveSeedPolicy(source.id)).resolves.toEqual({
+            id: source.id,
+            adapterType: 'torznab',
+            seedsBack: true,
+            applyTrackerSeedGoals: false,
+            seedRatioGoal: null,
+            seedTimeMinutes: null,
+          });
+          const [unchanged] = await ctx.db.select().from(schema.requestIndexers).where(eq(schema.requestIndexers.id, source.id));
+          expect(unchanged).toMatchObject({ applyTrackerSeedGoals: true, seedRatioGoal: 1, seedTimeMinutes: 4320 });
+
+          await ctx.db.update(schema.requestIndexers).set({ applyTrackerSeedGoals: false }).where(eq(schema.requestIndexers.id, source.id));
+          await ctx.db.update(schema.requestIndexerManagers).set({ inheritSeedLimits: true }).where(eq(schema.requestIndexerManagers.id, manager.id));
+          await expect(service.resolveSeedPolicy(source.id)).resolves.toMatchObject({
+            applyTrackerSeedGoals: true,
+            seedRatioGoal: 1,
+            seedTimeMinutes: 4320,
+          });
+        } finally {
+          await ctx.db.delete(schema.requestIndexerManagers).where(eq(schema.requestIndexerManagers.id, manager.id));
+        }
+      },
+      SCENARIO_TIMEOUT_MS,
+    );
+
+    it(
+      'preserves standalone manual goals when the manager join has no row',
+      async () => {
+        const [source] = await ctx.db
+          .insert(schema.requestIndexers)
+          .values({
+            name: `standalone-seed-policy-${randomUUID()}`,
+            adapterType: 'torznab',
+            baseUrl: 'http://127.0.0.1:9117',
+            applyTrackerSeedGoals: false,
+            seedRatioGoal: 2,
+            seedTimeMinutes: 90,
+          })
+          .returning();
+        try {
+          await expect(ctx.app.get(IndexerConfigService).resolveSeedPolicy(source.id)).resolves.toEqual({
+            id: source.id,
+            adapterType: 'torznab',
+            seedsBack: true,
+            applyTrackerSeedGoals: false,
+            seedRatioGoal: 2,
+            seedTimeMinutes: 90,
+          });
+        } finally {
+          await ctx.db.delete(schema.requestIndexers).where(eq(schema.requestIndexers.id, source.id));
+        }
       },
       SCENARIO_TIMEOUT_MS,
     );

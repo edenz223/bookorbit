@@ -5,7 +5,7 @@ import AnnotationEntry from '../shared/AnnotationEntry.vue'
 import AnnotationEntryDetail from '../shared/AnnotationEntryDetail.vue'
 import { copyToClipboard } from '@/lib/clipboard'
 
-vi.mock('@/lib/clipboard', () => ({ copyToClipboard: vi.fn().mockResolvedValue(true) }))
+vi.mock('@/lib/clipboard', () => ({ copyToClipboard: vi.fn<() => Promise<boolean>>().mockResolvedValue(true) }))
 
 const annotation: AnnotationItem = {
   id: 1,

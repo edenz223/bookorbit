@@ -697,4 +697,68 @@ describe('epub-opf-builder', () => {
       expect(textsOf(result, 'title')).toEqual(['Dune', 'Shelf label']);
     });
   });
+
+  // epubBuilder spells the package's default namespace `mlns`, so foliate found no <spine> once a
+  // save bound opf: on <package> (bookorbit/bookorbit#1680).
+  describe('packages without a default namespace', () => {
+    function epubBuilderOpf(extraPackageAttrs = ''): string {
+      return `<?xml version="1.0" encoding="UTF-8"?><package version="2.0" unique-identifier="PrimaryID" mlns="${OPF_NS}"${extraPackageAttrs}><metadata xmlns:dc="${DC_NS}" xmlns:opf="${OPF_NS}"><dc:title>鬼吹灯Ⅰ</dc:title><dc:creator opf:role="aut" opf:file-as="天下霸唱">天下霸唱</dc:creator><dc:identifier id="PrimaryID">urn:isbn:9787539628042</dc:identifier><meta name="cover" content="cover-image"></meta></metadata><manifest><item id="chapter1" href="chapter1.html" media-type="application/xhtml+xml"></item><item id="cover-image" href="images/cover.jpg" media-type="image/jpeg"></item></manifest><spine toc="ncx"><itemref idref="chapter1" linear="yes"></itemref></spine></package>`;
+    }
+
+    function packageAttributes(opfXml: string): Record<string, string> {
+      const node = (inspector.parse(opfXml) as OrderedNode[]).find((candidate) => tagOf(candidate).split(':').at(-1) === 'package');
+      if (!node) throw new Error('Missing <package> in OPF');
+      return (node[':@'] ?? {}) as Record<string, string>;
+    }
+
+    function declarationsOnPackage(opfXml: string, declaration: string): number {
+      const packageTag = opfXml.match(/<(?:\w+:)?package\b[^>]*>/)?.[0] ?? '';
+      return packageTag.split(/\s+/).filter((token) => token.startsWith(`${declaration}=`)).length;
+    }
+
+    it('puts a package with a misspelled xmlns back in the OPF namespace', () => {
+      const result = build(epubBuilderOpf(), { title: 'Replacement' }).newOpfXml;
+
+      expect(packageAttributes(result)).toMatchObject({ xmlns: OPF_NS, 'xmlns:opf': OPF_NS, 'xmlns:dc': DC_NS, mlns: OPF_NS });
+    });
+
+    it('repairs a package an earlier save already bound opf: and dc: on', () => {
+      const shipped = epubBuilderOpf(` xmlns:opf="${OPF_NS}" xmlns:dc="${DC_NS}"`);
+
+      const result = build(shipped, { title: 'Replacement' }).newOpfXml;
+
+      expect(packageAttributes(result).xmlns).toBe(OPF_NS);
+      expect(declarationsOnPackage(result, 'xmlns:opf')).toBe(1);
+      expect(declarationsOnPackage(result, 'xmlns:dc')).toBe(1);
+    });
+
+    it('leaves the manifest and spine exactly as written', () => {
+      const result = build(epubBuilderOpf(), { title: 'Replacement' }).newOpfXml;
+
+      expect(result).toContain(
+        '<manifest><item id="chapter1" href="chapter1.html" media-type="application/xhtml+xml"></item><item id="cover-image" href="images/cover.jpg" media-type="image/jpeg"></item></manifest>',
+      );
+      expect(result).toContain('<spine toc="ncx"><itemref idref="chapter1" linear="yes"></itemref></spine>');
+    });
+
+    it('declares the namespace once across repeated saves', () => {
+      const outputs = saveRepeatedly(epubBuilderOpf(), { title: 'Replacement' }, 3);
+
+      expect(outputs.map((output) => declarationsOnPackage(output, 'xmlns'))).toEqual([1, 1, 1]);
+    });
+
+    it('keeps the default namespace a package already declares', () => {
+      const result = build(opfDocument('2.0', '', sourceMetadata), { title: 'Replacement' }).newOpfXml;
+
+      expect(packageAttributes(result).xmlns).toBe(OPF_NS);
+      expect(declarationsOnPackage(result, 'xmlns')).toBe(1);
+    });
+
+    it('does not add a default namespace to a package qualified with a prefix', () => {
+      const result = build(opfDocument('2.0', 'opf', sourceMetadata), { title: 'Replacement' }).newOpfXml;
+
+      expect(packageAttributes(result)).not.toHaveProperty('xmlns');
+      expect(result).toContain('<opf:package');
+    });
+  });
 });

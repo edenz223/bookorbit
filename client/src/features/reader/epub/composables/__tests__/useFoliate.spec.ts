@@ -190,6 +190,30 @@ describe('useFoliate.open', () => {
     expect(foliate.isFixedLayout.value).toBe(false)
   })
 
+  it('makes publisher font sizes in a reflowable EPUB follow the reader text size', async () => {
+    const book = { type: 'book', rendition: { layout: 'reflowable' }, transformTarget: new EventTarget() }
+    ;(window as unknown as { makeStreamingBook: ReturnType<typeof vi.fn> }).makeStreamingBook.mockResolvedValueOnce(book)
+    const foliate = useFoliate(() => container)
+
+    await foliate.open(1, 2, 'epub', null, undefined)
+
+    const detail = { data: 'body { font-size: medium }' }
+    book.transformTarget.dispatchEvent(new CustomEvent('css', { detail }))
+    expect(detail.data).toBe('body { font-size: var(--bookorbit-font-medium, medium) }')
+  })
+
+  it('leaves publisher font sizes in a fixed-layout EPUB alone', async () => {
+    const book = { type: 'book', rendition: { layout: 'pre-paginated' }, transformTarget: new EventTarget() }
+    ;(window as unknown as { makeStreamingBook: ReturnType<typeof vi.fn> }).makeStreamingBook.mockResolvedValueOnce(book)
+    const foliate = useFoliate(() => container)
+
+    await foliate.open(1, 2, 'epub', null, undefined)
+
+    const detail = { data: 'body { font-size: medium }' }
+    book.transformTarget.dispatchEvent(new CustomEvent('css', { detail }))
+    expect(detail.data).toBe('body { font-size: medium }')
+  })
+
   it('tracks whether the opened EPUB is fixed-layout', async () => {
     const book = { type: 'book', rendition: { layout: 'pre-paginated', spread: 'auto' } }
     ;(window as unknown as { makeStreamingBook: ReturnType<typeof vi.fn> }).makeStreamingBook.mockResolvedValueOnce(book)

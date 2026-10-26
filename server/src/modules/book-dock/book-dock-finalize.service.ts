@@ -441,6 +441,8 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
         throw err;
       }
 
+      // After the metadata, whose duration it supersedes, and before any write-back touches the files.
+      await this.measureAudioDurations(written.bookIds, row.id);
       this.processor.reconcileCoversAsync(written.bookIds);
       await this.cleanupBookDockRecord(row);
       if (library.fileWriteEnabled) {
@@ -775,6 +777,29 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
       .split(sep)
       .map((segment) => this.validator.sanitizeFilename(segment))
       .join(sep);
+  }
+
+  /**
+   * The audiobook player derives progress from each audio file's own duration, and nothing else
+   * measures a filed file before the library's next scan; without one, listening stays at 0%.
+   * Never throws: the book is already filed, and a scan repairs whatever this could not measure.
+   */
+  private async measureAudioDurations(bookIds: number[], fileId: number): Promise<void> {
+    for (const bookId of bookIds) {
+      const startedAt = Date.now();
+      try {
+        const { measured, failed } = await this.metadataService.measureMissingAudioDurations(bookId);
+        if (failed > 0) {
+          this.logger.warn(
+            `[book_dock.measure_audio_durations] [end] fileId=${fileId} bookId=${bookId} durationMs=${Date.now() - startedAt} measured=${measured} failed=${failed} - some audio durations could not be measured`,
+          );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `[book_dock.measure_audio_durations] [fail] fileId=${fileId} bookId=${bookId} durationMs=${Date.now() - startedAt} errorClass=${err instanceof Error ? err.name : 'Error'} error="${sanitizeLogValue(err instanceof Error ? err.message : String(err))}" - audio duration measurement failed`,
+        );
+      }
+    }
   }
 
   /** Undoes a part-placed unit. Never throws: it runs while another error is on its way up. */

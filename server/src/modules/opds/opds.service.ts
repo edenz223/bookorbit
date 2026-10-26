@@ -1,6 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common';
 
 import { esc, fileMimeType, OPDS_MIME_ACQ, OPDS_MIME_ATOM, OPDS_MIME_NAV, OPDS_MIME_SEARCH, xmlEl, xmlLink } from './opds-xml.helpers';
+import { htmlToPlainText } from '../../common/utils/html-to-text.utils';
 import { DeliverySelectionService } from '../book/delivery-selection.service';
 import type { OpdsRequestUser } from './opds-auth.guard';
 import type { OpdsBookEntry } from './opds-book.service';
@@ -172,8 +173,12 @@ export class OpdsService {
       lines.push(`  <author>${xmlEl('name', author)}</author>`);
     }
 
-    if (book.description) {
-      lines.push(`  <content type="text">${esc(book.description)}</content>`);
+    // Descriptions are stored as HTML. Clients that honour type="text" show markup literally,
+    // and type="html" would hand unsanitized markup from book files and providers to clients
+    // that render it, so the feed carries the text alone.
+    const description = book.description ? htmlToPlainText(book.description, { preserveLineBreaks: true }) : '';
+    if (description) {
+      lines.push(`  <content type="text">${esc(description)}</content>`);
     } else {
       lines.push('  <content type="text"/>');
     }

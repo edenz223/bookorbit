@@ -62,6 +62,7 @@ function makeService() {
     replaceGenres: vi.fn().mockResolvedValue(undefined),
     replaceNarrators: vi.fn().mockResolvedValue(undefined),
     upsertComicMetadata: vi.fn().mockResolvedValue(undefined),
+    measureMissingAudioDurations: vi.fn().mockResolvedValue({ measured: 0, failed: 0 }),
   };
   const metadataScoreService = {
     calculateAndSave: vi.fn().mockResolvedValue(undefined),
@@ -733,6 +734,20 @@ describe('BookDockFinalizeService', () => {
         // The book keeps the title and authors it already had.
         expect(applyJoined).toHaveBeenCalledWith(42, expect.objectContaining({ id: 1 }), null, null);
         expect(applyMetadata).not.toHaveBeenCalled();
+      });
+
+      /** Issue 1757: an audiobook joining an ebook was filed with no duration, so listening stayed at 0%. */
+      it('measures the audio durations of the book it joined', async () => {
+        const { service, processor, metadataService } = makeService();
+        stubFolderLibrary(service);
+        vi.spyOn(service as never, 'applyJoinedMetadata').mockResolvedValue(undefined as never);
+        mockAccess.mockRejectedValueOnce(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+        mockStat.mockResolvedValueOnce({ size: 100 } as never);
+        processor.createUnitBookRecords.mockResolvedValueOnce({ bookIds: [42], createdBookIds: [], attachedFileIds: [900] });
+
+        await (service as any).finalizeFile(audioRow(), undefined, undefined, new Map([[1, { joinBook }]]), 1, true);
+
+        expect(metadataService.measureMissingAudioDurations.mock.calls).toEqual([[42]]);
       });
 
       it('files the ordinary way in a library where a book is a single file', async () => {
@@ -2385,6 +2400,113 @@ describe('BookDockFinalizeService', () => {
       // The staged cover came from the primary file, so only its book gets it; reconcile fills the rest.
       expect(applyMetadata.mock.calls.map((call: unknown[]) => call[2])).toEqual([true, false]);
       expect(harness.processor.reconcileCoversAsync).toHaveBeenCalledWith([81, 82]);
+    });
+
+    /**
+     * Issue 1757: the player derives progress only from per-file durations, and finalize used to
+     * leave them empty until the next scan, so a filed audiobook stayed at 0% and never reached
+     * Continue Listening.
+     */
+    describe('audio durations', () => {
+      it('measures every book the unit produced, after its metadata and before any write-back', async () => {
+        const harness = makeService();
+        harness.repo.findUnitFiles.mockResolvedValue(MULTI_FORMAT_FILES);
+        arrange(harness, { organizationMode: 'book_per_file', destPath: '/library/Dune.epub', fileWriteEnabled: true });
+        harness.processor.createUnitBookRecords.mockResolvedValue({ bookIds: [101, 102], createdBookIds: [101, 102], attachedFileIds: [] });
+        const order: string[] = [];
+        vi.spyOn(harness.service as never, 'applyMetadata').mockImplementation(((bookId: number) => {
+          order.push(`metadata:${bookId}`);
+          return Promise.resolve();
+        }) as never);
+        harness.metadataService.measureMissingAudioDurations.mockImplementation((bookId: number) => {
+          order.push(`measure:${bookId}`);
+          return Promise.resolve({ measured: 1, failed: 0 });
+        });
+        harness.fileWriteService.scheduleWrite.mockImplementation((bookId: number) => {
+          order.push(`write:${bookId}`);
+        });
+
+        const result = await finalize(harness, multiFormatRow());
+
+        expect(result.success).toBe(true);
+        expect(order).toEqual(['metadata:101', 'metadata:102', 'measure:101', 'measure:102', 'write:101', 'write:102']);
+      });
+
+      it('measures the one book of a multi-track audiobook', async () => {
+        const harness = makeService();
+        harness.repo.findUnitFiles.mockResolvedValue(AUDIO_UNIT_FILES);
+        arrange(harness);
+        harness.processor.createUnitBookRecords.mockResolvedValue({ bookIds: [77], createdBookIds: [77], attachedFileIds: [] });
+
+        const result = await finalize(harness, unitRow());
+
+        expect(result).toMatchObject({ success: true, bookId: 77 });
+        expect(harness.metadataService.measureMissingAudioDurations.mock.calls).toEqual([[77]]);
+      });
+
+      it('keeps the book filed when measuring fails, and still measures the next book', async () => {
+        const harness = makeService();
+        harness.repo.findUnitFiles.mockResolvedValue(MULTI_FORMAT_FILES);
+        arrange(harness, { organizationMode: 'book_per_file', destPath: '/library/Dune.epub', fileWriteEnabled: true });
+        harness.processor.createUnitBookRecords.mockResolvedValue({ bookIds: [101, 102], createdBookIds: [101, 102], attachedFileIds: [] });
+        harness.metadataService.measureMissingAudioDurations
+          .mockRejectedValueOnce(new Error('connection reset'))
+          .mockResolvedValueOnce({ measured: 1, failed: 0 });
+        const warn = vi.spyOn((harness.service as any).logger, 'warn').mockImplementation(() => undefined);
+
+        const result = await finalize(harness, multiFormatRow());
+
+        expect(result).toMatchObject({ success: true, bookId: 101 });
+        expect(harness.metadataService.measureMissingAudioDurations.mock.calls).toEqual([[101], [102]]);
+        expect(harness.processor.deleteUnitBookRecords).not.toHaveBeenCalled();
+        // Only the forward moves: nothing went back to the dock.
+        expect(harness.storage.moveToPath).toHaveBeenCalledTimes(2);
+        expect(harness.fileWriteService.scheduleWrite).toHaveBeenCalledTimes(2);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[book_dock\.measure_audio_durations\] \[fail\] fileId=42 bookId=101 .*errorClass=Error error="connection reset"/),
+        );
+      });
+
+      it('logs files it could not measure without failing the import', async () => {
+        const harness = makeService();
+        harness.repo.findUnitFiles.mockResolvedValue(AUDIO_UNIT_FILES);
+        arrange(harness);
+        harness.processor.createUnitBookRecords.mockResolvedValue({ bookIds: [77], createdBookIds: [77], attachedFileIds: [] });
+        harness.metadataService.measureMissingAudioDurations.mockResolvedValueOnce({ measured: 1, failed: 1 });
+        const warn = vi.spyOn((harness.service as any).logger, 'warn').mockImplementation(() => undefined);
+
+        const result = await finalize(harness, unitRow());
+
+        expect(result).toMatchObject({ success: true, bookId: 77 });
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[book_dock\.measure_audio_durations\] \[end\] fileId=42 bookId=77 .*measured=1 failed=1/),
+        );
+      });
+
+      it('measures nothing when the metadata pass fails and the unit is taken back', async () => {
+        const harness = makeService();
+        harness.repo.findUnitFiles.mockResolvedValue(AUDIO_UNIT_FILES);
+        arrange(harness);
+        harness.processor.createUnitBookRecords.mockResolvedValue({ bookIds: [77], createdBookIds: [77], attachedFileIds: [] });
+        vi.spyOn(harness.service as never, 'applyMetadata').mockRejectedValue(new Error('metadata exploded') as never);
+
+        const result = await finalize(harness, unitRow());
+
+        expect(result.success).toBe(false);
+        expect(harness.metadataService.measureMissingAudioDurations).not.toHaveBeenCalled();
+      });
+
+      it('measures nothing when the book rows cannot be written', async () => {
+        const harness = makeService();
+        harness.repo.findUnitFiles.mockResolvedValue(AUDIO_UNIT_FILES);
+        arrange(harness);
+        harness.processor.createUnitBookRecords.mockRejectedValue(new Error('create failed'));
+
+        const result = await finalize(harness, unitRow());
+
+        expect(result.success).toBe(false);
+        expect(harness.metadataService.measureMissingAudioDurations).not.toHaveBeenCalled();
+      });
     });
 
     describe('metadata write-back', () => {
