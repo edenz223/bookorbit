@@ -4,7 +4,8 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import * as schema from '../../db/schema';
 
-export const CONTEXT_ALGORITHM_VERSION = 1;
+// Include device-position backfill in the context pipeline version.
+export const CONTEXT_ALGORITHM_VERSION = 2;
 export const contextPosition = alias(schema.annotationPositions, 'context_position');
 export const contextPdfPosition = alias(schema.annotationPositions, 'context_pdf_position');
 export const contextFileId = sql<

@@ -11,7 +11,7 @@ const EVENT = 'annotation.cfi_backfill';
 
 /**
  * Lazily converts device xpointer positions to CFIs so the web reader can draw
- * them. Runs bounded batches on reader load; rows whose conversion failed are
+ * them. Runs bounded batches on reader load and context generation; failed rows are
  * retried only after a converter upgrade (converterVersion sweep).
  */
 @Injectable()
@@ -51,10 +51,10 @@ export class AnnotationConversionService {
     return projected;
   }
 
-  async ensureCfiPositionsForBook(userId: number, bookId: number, limit = 25): Promise<number> {
+  async ensureCfiPositionsForBook(userId: number, bookId: number, limit = 25, annotationIds?: number[]): Promise<number> {
     const startedAtMs = Date.now();
     try {
-      const candidates = await this.findCandidates(userId, bookId, limit);
+      const candidates = await this.findCandidates(userId, bookId, limit, annotationIds);
       if (candidates.length === 0) return 0;
 
       let converted = 0;
@@ -113,8 +113,9 @@ export class AnnotationConversionService {
     userId: number,
     bookId: number,
     limit: number,
+    annotationIds?: number[],
   ): Promise<{ annotationId: number; text: string; pos0: string; pos1: string | null; bookFileId: number }[]> {
-    const xpointerRows = await this.positionRepo.findXPointerRowsForBook(userId, bookId);
+    const xpointerRows = await this.positionRepo.findXPointerRowsForBook(userId, bookId, annotationIds);
 
     const usable = xpointerRows.filter((row) => row.pos0 != null && row.bookFileId != null && row.status !== 'failed');
     if (usable.length === 0) return [];

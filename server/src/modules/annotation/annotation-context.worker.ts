@@ -6,6 +6,7 @@ import { stat } from 'fs/promises';
 import { BOOK_FILE_CHANGED, BOOK_CONTEXT_CHANGED, bookFileEvents } from '../../common/utils/book-file-events';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 import { PositionConverterService } from '../position-converter/position-converter.service';
+import { AnnotationConversionService } from './annotation-conversion.service';
 import { AnnotationContextRepository, type AnnotationContextInput, type ContextClaim } from './annotation-context.repository';
 
 export async function contextPhysicalFingerprint(file: {
@@ -36,6 +37,7 @@ export class AnnotationContextWorker implements OnApplicationBootstrap, OnModule
   constructor(
     private readonly repository: AnnotationContextRepository,
     private readonly converter: PositionConverterService,
+    private readonly positionConversion: AnnotationConversionService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -141,6 +143,19 @@ export class AnnotationContextWorker implements OnApplicationBootstrap, OnModule
       }
     }
     inputs = await this.inputs(jobs);
+    const missingPositions = new Map<string, { userId: number; bookId: number; ids: number[] }>();
+    for (const input of inputs) {
+      if (!input.bookFileId || !['epub', 'kepub'].includes(input.format ?? '') || failures.has(input.annotationId)) continue;
+      if (input.cfi && ['exact', 'repaired'].includes(input.positionStatus ?? '')) continue;
+      const key = input.userId + ':' + input.bookId;
+      const group = missingPositions.get(key) ?? { userId: input.userId, bookId: input.bookId, ids: [] };
+      group.ids.push(input.annotationId);
+      missingPositions.set(key, group);
+    }
+    for (const group of missingPositions.values()) {
+      await this.positionConversion.ensureCfiPositionsForBook(group.userId, group.bookId, group.ids.length, group.ids);
+    }
+    if (missingPositions.size) inputs = await this.inputs(jobs);
     const supported = inputs.filter(
       (input) =>
         input.cfi &&

@@ -57,3 +57,15 @@ database and restore any changed application/download/filebrowser data and saved
 configuration. Select the recorded old image digest and start the old app.
 Do not connect the old image directly to the upgraded database. No automatic
 down-migration is provided.
+
+## Automatic device position conversion
+
+The context worker converts missing KOReader xpointer positions to CFIs before
+extracting context. It reuses the reader conversion service and restricts queries
+to the claimed user-owned annotations, with at most 25 jobs per batch.
+
+Context pipeline version 2 automatically requeues old results, including rows
+previously marked unavailable because no CFI existed. Opening the reader is no
+longer required. Positions that cannot be converted remain unavailable, and
+unsupported formats retain their existing fallback to the original highlight.
+No database schema migration is required for this update.

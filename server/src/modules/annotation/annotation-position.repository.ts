@@ -55,6 +55,7 @@ export class AnnotationPositionRepository {
   async findXPointerRowsForBook(
     userId: number,
     bookId: number,
+    annotationIds?: number[],
   ): Promise<{ annotationId: number; text: string; pos0: string | null; pos1: string | null; bookFileId: number | null; status: string }[]> {
     return this.db
       .select({
@@ -67,7 +68,15 @@ export class AnnotationPositionRepository {
       })
       .from(annotations)
       .innerJoin(annotationPositions, and(eq(annotationPositions.annotationId, annotations.id), eq(annotationPositions.format, 'xpointer')))
-      .where(and(eq(annotations.userId, userId), eq(annotations.bookId, bookId), isNull(annotations.deletedAt)));
+      .where(
+        and(
+          eq(annotations.userId, userId),
+          eq(annotationPositions.userId, userId),
+          eq(annotations.bookId, bookId),
+          isNull(annotations.deletedAt),
+          annotationIds ? inArray(annotations.id, annotationIds) : undefined,
+        ),
+      );
   }
 
   async markPending(annotationId: number, format: AnnotationPositionFormat): Promise<void> {

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PositionConverterService } from '../position-converter/position-converter.service';
 import { AnnotationContextRepository, CONTEXT_RETRY_DELAYS } from './annotation-context.repository';
+import { AnnotationConversionService } from './annotation-conversion.service';
 import { AnnotationContextWorker } from './annotation-context.worker';
 
 vi.mock('fs/promises', async (importOriginal) => ({ ...(await importOriginal<typeof import('fs/promises')>()), stat: vi.fn() }));
@@ -20,6 +21,7 @@ async function fixture() {
   const input = {
     annotationId: 1,
     userId: 7,
+    bookId: 2,
     bookFileId: 3,
     text: 'MARK',
     cfi: 'cfi',
@@ -46,14 +48,16 @@ async function fixture() {
     markFileChanged: vi.fn(),
   };
   const converter = { getHighlightContexts: vi.fn().mockResolvedValue(new Map([[1, { before: 'before ', after: ' after' }]])) };
+  const positionConversion = { ensureCfiPositionsForBook: vi.fn().mockResolvedValue(0) };
   const module = await Test.createTestingModule({
     providers: [
       AnnotationContextWorker,
+      { provide: AnnotationConversionService, useValue: positionConversion },
       { provide: AnnotationContextRepository, useValue: repository },
       { provide: PositionConverterService, useValue: converter },
     ],
   }).compile();
-  return { worker: module.get(AnnotationContextWorker), repository, converter, input, jobs };
+  return { worker: module.get(AnnotationContextWorker), repository, converter, positionConversion, input, jobs };
 }
 
 describe('persistent annotation context worker', () => {
@@ -64,6 +68,18 @@ describe('persistent annotation context worker', () => {
     expect(converter.getHighlightContexts).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ concurrency: 2 }));
     expect(repository.finish).toHaveBeenCalledWith(jobs[0], 'fingerprint', 3, { before: 'before ', after: ' after' }, null);
     expect(repository.fail).not.toHaveBeenCalled();
+  });
+
+  it('backfills only claimed device positions before extracting context', async () => {
+    const { worker, repository, converter, positionConversion, input } = await fixture();
+    repository.getInputs.mockResolvedValue([{ ...input, cfi: null, positionStatus: null }]);
+    positionConversion.ensureCfiPositionsForBook.mockImplementation(() => {
+      repository.getInputs.mockResolvedValue([input]);
+      return Promise.resolve(1);
+    });
+    await worker.tick();
+    expect(positionConversion.ensureCfiPositionsForBook).toHaveBeenCalledWith(7, 2, 1, [1]);
+    expect(converter.getHighlightContexts).toHaveBeenCalledWith([expect.objectContaining({ cfi: 'cfi' })], expect.any(Object));
   });
 
   it('records unsupported items without parsing them', async () => {

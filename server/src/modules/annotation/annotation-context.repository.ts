@@ -35,6 +35,7 @@ export class AnnotationContextRepository {
     return this.db
       .select({
         annotationId: annotations.id,
+        bookId: annotations.bookId,
         userId: annotations.userId,
         text: annotations.text,
         cfi: contextPosition.pos0,

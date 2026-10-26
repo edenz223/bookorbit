@@ -12,6 +12,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
+import { AnnotationConversionService } from './annotation-conversion.service';
+import { AnnotationPositionRepository } from './annotation-position.repository';
+import { AnnotationSyncService } from './annotation-sync.service';
+import { AchievementEventsService } from '../achievement/achievement-events.service';
 import { AnnotationRepository } from './annotation.repository';
 import { AnnotationSyncRepository } from './annotation-sync.repository';
 import { AnnotationContextRepository } from './annotation-context.repository';
@@ -95,6 +99,10 @@ describe.skipIf(!databaseUrl)('annotation context PostgreSQL persistence', () =>
         AnnotationRepository,
         AnnotationSyncRepository,
         AnnotationContextWorker,
+        AnnotationConversionService,
+        AnnotationPositionRepository,
+        AnnotationSyncService,
+        { provide: AchievementEventsService, useValue: { emit: vi.fn() } },
         EpubDomService,
         PositionConverterService,
         { provide: DB, useValue: db },
@@ -140,6 +148,30 @@ describe.skipIf(!databaseUrl)('annotation context PostgreSQL persistence', () =>
     expect(await repository.getStored(userId, [])).toEqual([]);
   });
 
+  it('generates context for device-only annotations without opening the reader', async () => {
+    const row = await create();
+    await db.delete(schema.annotationPositions).where(eq(schema.annotationPositions.annotationId, row.id));
+    await sync.upsertPosition({
+      annotationId: row.id,
+      userId,
+      bookFileId: fileId,
+      format: 'xpointer',
+      pos0: '/body/DocFragment[1]/body/p/text().8',
+      pos1: '/body/DocFragment[1]/body/p/text().13',
+      status: 'exact',
+    });
+    await db
+      .update(schema.annotationContexts)
+      .set({ status: 'unavailable', reason: 'position_unavailable', algorithmVersion: 1 })
+      .where(eq(schema.annotationContexts.annotationId, row.id));
+    await worker.tick();
+    await worker.tick();
+    expect((await contextRow(row.id)).status).toBe('ready');
+    const stored = await repository.getStored(userId, [row.id]);
+    expect(stored).toHaveLength(1);
+    expect((stored[0].before ?? '') + (stored[0].after ?? '')).toContain('Before.');
+  });
+
   it('atomically claims at most 25 jobs and does not double-claim across workers', async () => {
     for (let i = 0; i < 30; i++) await create();
     const [first, second] = await Promise.all([repository.claim(randomUUID()), repository.claim(randomUUID())]);
@@ -181,7 +213,7 @@ describe.skipIf(!databaseUrl)('annotation context PostgreSQL persistence', () =>
     await db.update(schema.annotationContextMaintenance).set({ algorithmVersion: 0 }).where(eq(schema.annotationContextMaintenance.name, 'backfill'));
     expect(await repository.getStored(userId, [row.id])).toEqual([]);
     expect(await repository.backfill(randomUUID())).toMatchObject({ scanned: 1, queued: 1 });
-    expect(await contextRow(row.id)).toMatchObject({ status: 'pending', algorithmVersion: 1, generation: generation + 1 });
+    expect(await contextRow(row.id)).toMatchObject({ status: 'pending', algorithmVersion: 2, generation: generation + 1 });
     await worker.tick();
     expect(await repository.getStored(userId, [row.id])).toHaveLength(1);
   });
